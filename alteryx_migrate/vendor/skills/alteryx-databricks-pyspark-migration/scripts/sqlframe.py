@@ -425,6 +425,8 @@ class AliasedFrame:
         on = _as_col(on)
         if how == "inner":
             return JoinFrame(self, other, on)
+        if how in ("full", "outer", "full_outer"):
+            return JoinFrame(self, other, on, "FULL OUTER")
         if how == "left_anti":
             f = self.frame
             return Frame(f.ctx, f.columns, {"select": [f"{self.alias_name}.{ident(c)}" for c in f.columns],
@@ -437,15 +439,15 @@ class AliasedFrame:
 
 
 class JoinFrame:
-    def __init__(self, left: AliasedFrame, right: AliasedFrame, on: Col):
-        self.left, self.right, self.on = left, right, on
+    def __init__(self, left: AliasedFrame, right: AliasedFrame, on: Col, kind: str = "INNER"):
+        self.left, self.right, self.on, self.kind = left, right, on, kind
 
     def select(self, *cols):
         f = self.left.frame
         texts, names = _items(cols, [])
         if any(t == "*" for t in texts):
             raise SqlError("select('*') after a join")
-        return Frame(f.ctx, names, {"select": texts, "from_": f"{f.ref()} AS {self.left.alias_name} INNER JOIN {self.right.frame.ref()} AS {self.right.alias_name} ON {self.on.sql}"},
+        return Frame(f.ctx, names, {"select": texts, "from_": f"{f.ref()} AS {self.left.alias_name} {self.kind} JOIN {self.right.frame.ref()} AS {self.right.alias_name} ON {self.on.sql}"},
                      [f, self.right.frame])
 
     def __getattr__(self, name):

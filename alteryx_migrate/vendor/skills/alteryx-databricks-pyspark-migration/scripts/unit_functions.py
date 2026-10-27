@@ -127,7 +127,8 @@ def build(wf, plan, answers=None, test_results=None):
     apply_schemas(wf, plan, answers.get("schemas"))
     options = {"text_match_case_insensitive": project["text_match_case_insensitive"], "ansi": project.get("ansi"),
                "null_safe_join": project.get("null_safe_join"),
-               "field_types": {str(k).lower(): str(v).lower() for k, v in (answers.get("field_types") or {}).items()}}
+               "field_types": {str(k).lower(): str(v).lower() for k, v in (answers.get("field_types") or {}).items()},
+               "join_inputs": dict(answers.get("join_inputs") or {})}
     plan, (em0, info, live_data, blocked, waiting) = NB.plan_with_ready_cuts(wf, plan, options)
     bad = set(blocked) | set(waiting)
     em = C.Emitter(wf, plan, options)

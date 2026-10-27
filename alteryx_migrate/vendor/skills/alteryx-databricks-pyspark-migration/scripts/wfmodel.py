@@ -51,6 +51,7 @@ NODE_SPECS = {
     "SpatialMatchNode": dict(kind="spatial", order="breaks"),
     "PredictiveModelNode": dict(kind="predictive", order="breaks"),
     "DataCleansingMacroNode": dict(kind="cleanse", order="preserve"),
+    "ImputationMacroNode": dict(kind="impute", order="preserve"),
     "UnsupportedNode": dict(kind="unsupported", order="breaks"),
 }
 NO_DATA_KINDS = {"browse", "comment"}
@@ -172,7 +173,7 @@ def load_workflow(path: str, overrides: Optional[dict] = None, yxmd: Optional[st
             nodes[int(nid)].update({k: v for k, v in ov.items()})
             nodes[int(nid)]["_override_keys"] = sorted(ov)
     _promote_external_sources(wf)
-    _promote_data_cleansing(wf)
+    _promote_macros(wf)
     wf.topo = _topo(wf)
     return wf
 
@@ -274,6 +275,49 @@ def cleanse_options(cfg: dict) -> Optional[dict]:
     if opts["modify_case"] and opts["case"] not in ("upper", "lower", "title"):
         return None
     return opts
+
+
+# The Imputation tool is Alteryx's macro Imputation_v3.yxmc: radio buttons / check boxes / a field list, named as below in the macro (<Name> of each question).
+IMPUTATION_QUESTIONS = {
+    "listbox Select Incoming Fields": "fields", "radio Null Value": "from_null", "radio User Specified Replace From Value": "from_user",
+    "updown User Replace Value": "from_value", "radio Mean": "to_mean", "radio Median": "to_median", "radio Mode": "to_mode",
+    "radio User Specified Replace With Value": "to_user", "updown User Replace With Value": "to_value",
+    "checkbox Impute Indicator": "indicator", "checkbox Imputed Values Separate Field": "separate",
+}
+
+
+def imputation_options(cfg: dict) -> Optional[dict]:
+    """The Imputation options from the macro call's <Configuration>, or None when a setting is not one the macro defines or the choice is not exactly one."""
+    values = cfg.get("Value") if isinstance(cfg, dict) else None
+    values = [values] if isinstance(values, dict) else values
+    if not isinstance(values, list):
+        return None
+    raw = {v.get("@name"): (v.get("#text") or "") for v in values if isinstance(v, dict)}
+    if not raw or any(k not in IMPUTATION_QUESTIONS for k in raw):
+        return None
+    flag = lambda name: str(raw.get(name, "")).strip().lower() == "true"          # noqa: E731
+    opts = {key: flag(name) for name, key in IMPUTATION_QUESTIONS.items() if name.startswith(("radio", "checkbox"))}
+    opts["fields"] = [f.replace('""', '"') for f in re.findall(r'"((?:[^"]|"")*)"', raw.get("listbox Select Incoming Fields", ""))]
+    try:
+        opts["from_value"], opts["to_value"] = float(raw.get("updown User Replace Value") or 0), float(raw.get("updown User Replace With Value") or 0)
+    except ValueError:
+        return None
+    if opts["from_null"] == opts["from_user"] or sum(opts[k] for k in ("to_mean", "to_median", "to_mode", "to_user")) != 1:
+        return None
+    return opts
+
+
+def _promote_macros(wf):
+    """Calls of Alteryx's own macros become nodes with named options: Data Cleansing (Cleanse.yxmc) and Imputation (Imputation_v3.yxmc)."""
+    _promote_data_cleansing(wf)
+    for nid, n in wf.nodes.items():
+        if n["node_type"] != "UnsupportedNode":
+            continue
+        macro = str(n.get("original_plugin_name") or "").lower().replace("\\", "/").rsplit("/", 1)[-1]
+        if macro in ("macro:imputation_v3.yxmc", "imputation_v3.yxmc"):
+            opts = imputation_options(n.get("original_configuration") or {})
+            if opts is not None:
+                n.update(node_type="ImputationMacroNode", original_tool_type="Imputation", impute=opts, converted_from="UnsupportedNode")
 
 
 def _promote_data_cleansing(wf):
@@ -466,7 +510,7 @@ def step_detail(wf: Workflow, bronze_of: dict, nid: int, anchor: str = "Output")
         return snake(re.sub(r"(?i)^macro:|\.yxmc$|_v\d+(\.\d+)*$", "", label), 20)
     return {"multifield": "adjusted", "select": "selected", "sort": "sorted", "union": "combined", "append": "appended",
             "crosstab": "pivot", "transpose": "unpivoted", "recordid": "indexed", "runningtotal": "running_total",
-            "text2cols": "split", "dynrename": "renamed", "cleanse": "cleansed", "datetime": "dated", "countrecords": "record_count", "autofield": "fitted", "spatial": "geo", "predictive": "forecast",
+            "text2cols": "split", "dynrename": "renamed", "cleanse": "cleansed", "impute": "imputed", "datetime": "dated", "countrecords": "record_count", "autofield": "fitted", "spatial": "geo", "predictive": "forecast",
             "literal": ""}.get(k, k)
 
 

@@ -179,7 +179,7 @@ class Emitter:
               "multirow": "win", "select": "sel", "sort": "srt", "unique": "uniq", "join": "jn", "joinmulti": "jnm",
               "union": "un", "append": "app", "summarize": "agg", "crosstab": "xtab", "transpose": "trn",
               "recordid": "rid", "runningtotal": "rt", "text2cols": "split", "dynrename": "ren", "datetime": "dt",
-              "spatial": "geo", "predictive": "ml", "unsupported": "mac", "cleanse": "cln"}
+              "spatial": "geo", "predictive": "ml", "unsupported": "mac", "cleanse": "cln", "impute": "imp"}
 
     def var(self, stream):
         """Variable name for a stream: the table name when read from a table in this unit, else a readable step name."""
@@ -247,6 +247,10 @@ class Emitter:
             if kind == "unknown" and hints.get(name):
                 types[name] = hints[name]
         return types
+
+    def need_join_inputs(self, node, slots, tools):
+        """The app asks which tool feeds each Join Multiple input (#k) when neither the workflow nor the field names say."""
+        node["_join_needed"] = {"slots": list(slots), "tools": list(tools)}
 
     def need_types(self, node, names):
         """Fields whose type the workflow does not state and that a choice depends on: the app asks the user for them (answers.field_types)."""
@@ -717,11 +721,105 @@ class Emitter:
         self.set_out(nid, ["Left"], lt, None)
         self.set_out(nid, ["Right"], rt, None)
 
+    # Join Multiple: every input's fields are named Input_#<k>_<field>; the inputs are joined on their key fields (inner when "output join only", else full outer);
+    # then the tool's own Select configuration (rename, deselect, order, retype) is applied.
+    def join_multi_inputs(self, nid, node):
+        """(mapping {'#k': stream} or None, [slots still unknown], [tools still unassigned], how). The workflow lists the inputs in file order only, so #k is found from
+        the fields each #k names (an input is a candidate for #k when the columns it is known to have contain all of them); the user's answers win and may be partial."""
+        streams = [(e.src, e.src_anchor) for e in self.wf.producers(nid)]
+        slots = list((node.get("join_inputs") or {}).keys())
+        by_src = {s[0]: s for s in streams}
+        given = {str(k): int(t) for k, t in ((self.options.get("join_inputs") or {}).get(str(nid)) or {}).items()}
+        mapping = {k: by_src[t] for k, t in given.items() if k in slots and t in by_src}
+        named = {k: set() for k in slots}
+        for op in node.get("select_ops") or []:
+            m = re.match(r"Input_(#\d+)_(.*)$", op["field_name"], re.S)
+            if m and m.group(1) in named:
+                named[m.group(1)].add(m.group(2).lower())
+        for k, f in (node.get("join_inputs") or {}).items():
+            named[k].update(x.lower() for x in f)
+        strong = {k: [s for s in streams if named[k] and (lambda cols: bool(cols) and named[k] <= set(cols))(self.t_in(s))] for k in slots}
+        changed = True
+        while changed:                                                 # settle a slot that has exactly one candidate left, then look again
+            changed = False
+            for k in slots:
+                left = [s for s in strong[k] if s not in mapping.values()]
+                if k not in mapping and len(left) == 1:
+                    mapping[k] = left[0]
+                    changed = True
+        rest_slots = [k for k in slots if k not in mapping]
+        rest_streams = [s for s in streams if s not in mapping.values()]
+        if len(rest_slots) == 1 and len(rest_streams) == 1:
+            mapping[rest_slots[0]] = rest_streams[0]
+            rest_slots, rest_streams = [], []
+        if rest_slots or len(streams) != len(slots):
+            return None, rest_slots, [s[0] for s in rest_streams], bool(given)
+        return mapping, [], [], bool(given)
+
     def e_joinmulti(self, nid, node, ins, anchors, r):
-        n_in = len(node.get("join_inputs") or {})
-        r.need("unsupported", f"Join Multiple ({n_in} inputs): output field naming for colliding fields (Input_#k_) and the join "
-                              "type are not verified - send a sample of the Alteryx output or confirm the rule")
-        self._blocked_guard(r, node, anchors, ins)
+        slots = list((node.get("join_inputs") or {}).keys())
+        if node.get("join_by_position"):
+            r.need("unsupported", "Join Multiple by record position is not implemented (needs an explicit row order on every input)")
+            return self._blocked_guard(r, node, anchors, ins)
+        keys = node.get("join_inputs") or {}
+        if not slots or not node.get("select_ops") or len({len(k) for k in keys.values()}) != 1 or not keys[slots[0]]:
+            r.need("blocked", "Join Multiple: its key fields or its output field list are missing from the workflow")
+            return self._blocked_guard(r, node, anchors, ins)
+        mapping, rest_slots, rest_tools, asked = self.join_multi_inputs(nid, node)
+        if mapping is None:
+            self.need_join_inputs(node, rest_slots, rest_tools)
+            r.need("blocked", f"Join Multiple: the workflow does not say which of its inputs is {', '.join(rest_slots) or 'which'} "
+                              f"(it has {len(self.wf.producers(nid))} connections for {len(slots)} numbered inputs; its output fields are named Input_#k_...): say which tool feeds each")
+            return self._blocked_guard(r, node, anchors, ins)
+        v = self.var((nid, "Output"))
+        out_types = {}
+        for k in slots:
+            frame, src = f"{v}_in{k[1:]}", self.var(mapping[k])
+            r.lines.append(f"{frame} = {src}.select(*[F.col(f'`{{c}}`').alias(f'Input_{k}_{{c}}') for c in {src}.columns])")
+            for name, t in self.t_in(mapping[k]).items():
+                out_types[f"input_{k}_{name}".lower()] = t
+        how = "inner" if node.get("output_join_only") else "full"
+        r.lines.append(f"{v}_joined = {v}_in{slots[0][1:]}")
+        for i, k in enumerate(slots[1:], 1):
+            conds = []
+            for j in range(len(keys[k])):
+                left = [f"F.col('`Input_{p}_{keys[p][j]}`')" for p in slots[:i]]
+                left = left[0] if len(left) == 1 or how == "inner" else f"F.coalesce({', '.join(left)})"
+                conds.append(f"({left} == F.col('`Input_{k}_{keys[k][j]}`'))")
+            frame = f"{v}_in{k[1:]}"
+            r.lines.append(f"{v}_joined = (\n    {v}_joined.alias('l')\n    .join({frame}.alias('r'), {' & '.join(conds)}, {how!r})\n"
+                           f"    .select(*[F.col(f'`{{c}}`') for c in {v}_joined.columns + {frame}.columns])\n)")
+        r.notes.append(f"Join Multiple: {'inner join of all inputs (Output Join Only)' if how == 'inner' else 'full outer join, so records that do not match every input are kept'}; "
+                       "the key fields of an input without a match are NULL")
+        if node.get("cartesian_mode", "Error") == "Error":
+            r.notes.append("Alteryx stops with an error when a key repeats in several inputs (a cartesian join); Spark would multiply the rows - the keys must be unique per input")
+        r.notes.append("Which tool is input #k " + ("was given by the user (the rest from the field names)" if asked else "was found from the field names the tool lists for each input"))
+        r.need("requires_review", "Join Multiple: the Input_#k_<field> naming and the join mode come from the tool's own settings; compare the output with Alteryx once")
+        ops = node["select_ops"]
+        order, drop, rename, retype, unknown = self.select_config(ops)
+        for op in ops:
+            nm = op["field_name"].lower()
+            if nm == "*unknown":
+                continue
+            if op.get("selected") is False:
+                out_types.pop(nm, None)
+            else:
+                t = out_types.pop(nm, "unknown")
+                if op.get("new_type"):
+                    t = CATEGORY.get(op["new_type"].lower(), t)
+                out_types[(op.get("rename_to") or op["field_name"]).lower()] = t
+        items = []
+        for name in order:
+            c = f"F.col('`{name}`')"
+            if name in retype:
+                c = self.retyped(r, c, retype[name])
+            target = rename.get(name) or (name if name in retype else None)
+            items.append(f"{c}.alias({target!r})" if target else c)
+        if unknown:
+            items.append(f"*[{DYNAMIC_COL} for c in {v}_joined.columns if c.lower() not in {skip_expr(r, v + '_named', order + drop)}]")
+        body = ",\n".join(f"    {i}" for i in items)
+        r.lines.append(f"{v} = {v}_joined.select(\n{body},\n)")
+        self.set_out(nid, ["Output"], out_types, None)
 
     def e_union(self, nid, node, ins, anchors, r):
         srcs = [self.var(s) for s in ins.get("Input", [])]
@@ -1104,6 +1202,54 @@ class Emitter:
         if o.get("remove_null_columns"):
             out_types = {}                                       # which fields remain is known only at run time
         self.set_out(nid, anchors, out_types, self.order.get(st))
+
+    # Imputation (Imputation_v3.yxmc): the rows to replace are the NULLs, or the rows equal to a value; the statistic is computed from the other rows.
+    def e_impute(self, nid, node, ins, anchors, r):
+        st = self.first_in(ins)
+        types = self.t_in(st)
+        o = node.get("impute") or {}
+        src, v = self.var(st), self.var((nid, "Output"))
+        fields = list(o.get("fields") or [])
+        to_name = next(k[3:] for k in ("to_mean", "to_median", "to_mode", "to_user") if o.get(k))
+        r.orig.append(f"Imputation: replace {'NULL' if o.get('from_null') else o.get('from_value')} in {fields} with {to_name}")
+        if not fields:
+            r.need("blocked", "Imputation has no field selected")
+            return self._blocked_guard(r, node, anchors, ins)
+        missing = [f for f in fields if types and f.lower() not in types]
+        if missing:
+            r.need("blocked", f"Imputation fields not found in the incoming data: {missing}")
+            return self._blocked_guard(r, node, anchors, ins)
+
+        def is_from(f):                                           # the rows that are replaced
+            return f"F.col({f!r}).isNull()" if o["from_null"] else f"(F.col({f!r}) == F.lit({o['from_value']!r}))"
+
+        def other(f):                                             # the rows the statistic is computed from
+            return f"F.col({f!r}).isNotNull()" if o["from_null"] else f"(F.col({f!r}) != F.lit({o['from_value']!r}))"
+
+        stat = {"mean": "F.avg", "median": "F.median", "mode": "F.mode"}.get(to_name)
+        cur = src
+        if stat:
+            aggs = ",\n".join(f"    {stat}(F.when({other(f)}, F.col({f!r}))).alias('_imp_{f}')" for f in fields)
+            r.lines.append(f"{v}_stats = {src}.agg(\n{aggs},\n)")
+            r.lines.append(f"{v} = {src}.crossJoin({v}_stats)")
+            cur = v
+            r.notes.append(f"Imputation: the {to_name} of each field is taken over the rows that are not replaced")
+            if to_name == "mode":
+                r.need("requires_review", "Imputation by mode: when two values are equally frequent Alteryx and Spark may pick different ones - compare on data")
+        with_ = (lambda f: f"F.col('_imp_{f}')") if stat else (lambda f: f"F.lit({o['to_value']!r})")
+        new = {}
+        for f in fields:
+            new[f"{f}_ImputedValue" if o["separate"] else f] = f"F.when({is_from(f)}, {with_(f)}).otherwise(F.col({f!r}))"
+            if o["indicator"]:
+                new[f"{f}_Indicator"] = f"F.when({is_from(f)}, F.lit(1)).otherwise(F.lit(0))"
+        body = ",\n".join(f"    {k!r}: {c}" for k, c in new.items())
+        r.lines.append(f"{v} = {cur}.withColumns({{\n{body},\n}})")
+        if stat:
+            r.lines.append(f"{v} = {v}.drop({', '.join(repr('_imp_' + f) for f in fields)})")
+        out = dict(types)
+        for k in new:
+            out[k.lower()] = "number"
+        self.set_out(nid, anchors, out, self.order.get(st))
 
     def e_predictive(self, nid, node, ins, anchors, r):
         r.need("unsupported", f"{node.get('model_type')}: predictive tool - re-implement the model and compare; no equivalence assumed")

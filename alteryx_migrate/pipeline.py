@@ -40,6 +40,8 @@ def mapping_defaults(inputs: dict, outputs: list, catalog: str, schema: str) -> 
 
 def decision_lines(choices: dict) -> list:
     lines = []
+    for tool, slots in ((choices or {}).get("_join_inputs") or {}).items():
+        lines.append(f"Tool [{tool}] (Join Multiple): " + ", ".join(f"input {k} comes from tool [{t}]" for k, t in slots.items()) + ".")
     types = (choices or {}).get("_field_types") or {}
     if types:
         lines.append("Field types given by the user (the workflow does not state them): " + ", ".join(f"{f} = {t}" for f, t in types.items()) + ".")

@@ -59,8 +59,18 @@ def _join(cfg):
 
 def _joinmulti(cfg):
     jf = cfg.find("JoinFields")
+    sel = cfg.find("SelectConfiguration/Configuration/SelectFields")
+    ops = []
+    for f in (sel.findall("SelectField") if sel is not None else []):
+        op = {"field_name": f.get("field"), "selected": f.get("selected", "True") == "True"}
+        if f.get("rename") and f.get("rename") != f.get("field"):
+            op["rename_to"] = f.get("rename")
+        if f.get("type"):
+            op["new_type"], op["new_size"] = f.get("type"), f.get("size")
+        ops.append(op)
     return {"join_inputs": {ji.get("connection"): _fields(ji) for ji in jf.findall("JoinInfo")} if jf is not None else {},
-            "join_by_position": _value(cfg, "JoinByRecPos") == "True"}
+            "join_by_position": _value(cfg, "JoinByRecPos") == "True",
+            "select_ops": ops, "output_join_only": _value(cfg, "OutputJoinOnly") == "True", "cartesian_mode": _text(cfg, "CartesianMode") or "Error"}
 
 
 def _crosstab(cfg):

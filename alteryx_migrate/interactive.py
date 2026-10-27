@@ -183,6 +183,20 @@ def gather(console: Console, analysis, handles: dict, args) -> Plan:
         if types:
             plan.decisions["_field_types"] = types
 
+    # 4c. which tool feeds each input of a Join Multiple (its output fields are named Input_#k_..., the workflow only lists the inputs in file order)
+    joins = {}
+    for q in getattr(analysis, "join_questions", []) or []:
+        console.say(f"\nJoin Multiple tool [{q['id']}] (container: {q['container']}) names its fields Input_{q['slots'][0]}_... to Input_{q['slots'][-1]}_..., but the workflow does not say")
+        console.say("   which tool feeds which input, and the field names do not settle it.")
+        left = [f"[{t['id']}] {t['name']}" for t in q["tools"]]
+        picked = {}
+        for slot in q["slots"]:
+            n = console.choose(f"   Which tool feeds input {slot}?", left, 1)
+            picked[slot] = left.pop(n - 1)
+        joins[str(q["id"])] = {slot: int(label[1:label.index("]")]) for slot, label in picked.items()}
+    if joins:
+        plan.decisions["_join_inputs"] = joins
+
     # 5. embedded Python tools
     for tool, info in py.items():
         console.say("")
@@ -198,8 +212,8 @@ def gather(console: Console, analysis, handles: dict, args) -> Plan:
     for u in inventory:
         if u.get("decision") == "order" or str(u.get("plugin", "")).lower().startswith("macro") or "output tool" in u.get("reason", "") or u["status"].startswith("waits"):
             continue
-        if int(u["id"]) in py:
-            continue
+        if int(u["id"]) in py or int(u["id"]) in {q["id"] for q in getattr(analysis, "join_questions", []) or []}:
+            continue                                            # a Python tool has its own question; a Join Multiple was asked above
         console.say(f"\nTool {_tool_label(u)} has no converter: {u['reason']}")
         recipe = TC.explain(u.get("plugin"), u.get("name")) or ""
         if recipe:
@@ -213,7 +227,7 @@ def gather(console: Console, analysis, handles: dict, args) -> Plan:
                     "The notebooks write Delta tables instead; add the export where you need it.")
 
     # 7. the model
-    wants_model = any(v == "port" for v in plan.port.values()) or any(not u["status"].startswith("waits") and u.get("decision") != "order" and "output tool" not in u.get("reason", "") and int(u["id"]) not in py for u in inventory)
+    wants_model = any(v == "port" for v in plan.port.values()) or any(not u["status"].startswith("waits") and u.get("decision") != "order" and "output tool" not in u.get("reason", "") and int(u["id"]) not in py and str(u["id"]) not in joins for u in inventory)
     if wants_model:
         if getattr(args, "model", None) or os.environ.get("MODEL"):
             plan.model = getattr(args, "model", None) or os.environ["MODEL"]

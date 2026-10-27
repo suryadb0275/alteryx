@@ -70,6 +70,7 @@ class Analysis:
     coverage: dict = field(default_factory=dict)
     workdir: str = ""
     inventory: list = field(default_factory=list)       # every tool: {"id","name","container","status"}
+    join_questions: list = field(default_factory=list)  # Join Multiple tools whose #k inputs are unknown: {"id","name","container","slots","tools":[{"id","name"}]}
     type_questions: list = field(default_factory=list)  # tools that depend on the type of a field the workflow does not state: {"id","name","container","fields"}
 
     def summary(self) -> dict:
@@ -275,13 +276,17 @@ def merge_answers(decisions: dict | None) -> dict:
 
 def decisions_from_choices(choices: dict) -> dict:
     """UI choices -> skill answers. choices = {tool id: {"mode": "any" | "order_by", "fields": [..], "ascending": bool}};
-    choices["_field_types"] = {field: "string" | "number" | "date" | "datetime" | "bool"}: types of fields the workflow does not state, for every tool."""
+    choices["_join_inputs"] = {tool id: {"#k": id of the tool that feeds input #k}} (Join Multiple); choices["_field_types"] = {field: "string" | "number" | "date" | "datetime" | "bool"}: types of fields the workflow does not state, for every tool."""
     any_row, overrides = [], {}
     out: dict = {}
     for tool, c in choices.items():
         if tool == "_field_types":
             if c:
                 out["field_types"] = dict(c)
+            continue
+        if tool == "_join_inputs":                          # {join multiple tool id: {"#1": tool id feeding it, ...}}
+            if c:
+                out["join_inputs"] = {str(k): dict(v) for k, v in c.items()}
             continue
         if c.get("mode") == "any":
             any_row.append(int(tool))
@@ -395,6 +400,9 @@ def plan_workflow(yxmd: Path, mapping: Path, slim: Path, doc: dict, work: Path, 
                                 "connection": str(wf.nodes[v["nodes"][0]].get("connection_string") or "") if v.get("nodes") else ""} for k, v in built["bronze"].items()},
                         outputs=[c.id for c in chunks], macros_missing=missing, coverage=cov, workdir=str(work),
                         warnings=[f"macro not uploaded: {m}" for m in missing], inventory=inventory,
+                        join_questions=[{"id": int(n), "name": tool_name(wf, n), "container": container([n]), "slots": wf.nodes[n]["_join_needed"]["slots"],
+                                         "tools": [{"id": int(t), "name": tool_name(wf, t)} for t in wf.nodes[n]["_join_needed"]["tools"]]}
+                                        for n in sorted(wf.nodes) if wf.nodes[n].get("_join_needed")],
                         type_questions=[{"id": int(n), "name": tool_name(wf, n), "container": container([n]), "fields": list(wf.nodes[n]["_types_needed"])}
                                         for n in sorted(wf.nodes) if wf.nodes[n].get("_types_needed")])
     return analysis, {"slim_dir": slim, "wf": wf}

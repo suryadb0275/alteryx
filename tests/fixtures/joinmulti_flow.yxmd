@@ -1,0 +1,116 @@
+<?xml version="1.0"?>
+<AlteryxDocument yxmdVer="2021.3">
+  <Nodes>
+    <Node ToolID="1">
+      <GuiSettings Plugin="big_query_input_v3.0.0">
+        <Position x="100" y="100" />
+      </GuiSettings>
+      <Properties>
+        <Configuration>
+          <authType>ServicePrincipal</authType>
+          <usingCustomFilter>True</usingCustomFilter>
+          <inputCustomFilter>select K, A from sap_data.Left_Table</inputCustomFilter>
+          <customFilterProjectId>demo-project</customFilterProjectId>
+          <sqlType>STANDARD_SQL</sqlType>
+        </Configuration>
+        <Annotation DisplayMode="0">
+          <Name />
+          <DefaultAnnotationText />
+          <Left value="False" />
+        </Annotation>
+        <MetaInfo connection="Output">
+          <RecordInfo>
+            <Field name="K" source="BigQuery" type="V_WString" size="255" />
+            <Field name="A" source="BigQuery" type="Double" size="8" />
+          </RecordInfo>
+        </MetaInfo>
+      </Properties>
+      <EngineSettings Macro="BigQuery\big_query_input.yxmc" EngineDll="Macro" EngineDllEntryPoint="BigQuery\big_query_input.yxmc" />
+    </Node>
+    <Node ToolID="2">
+      <GuiSettings Plugin="big_query_input_v3.0.0">
+        <Position x="100" y="200" />
+      </GuiSettings>
+      <Properties>
+        <Configuration>
+          <authType>ServicePrincipal</authType>
+          <usingCustomFilter>True</usingCustomFilter>
+          <inputCustomFilter>select K, B from sap_data.Right_Table</inputCustomFilter>
+          <customFilterProjectId>demo-project</customFilterProjectId>
+          <sqlType>STANDARD_SQL</sqlType>
+        </Configuration>
+        <Annotation DisplayMode="0">
+          <Name />
+          <DefaultAnnotationText />
+          <Left value="False" />
+        </Annotation>
+        <MetaInfo connection="Output">
+          <RecordInfo>
+            <Field name="K" source="BigQuery" type="V_WString" size="255" />
+            <Field name="B" source="BigQuery" type="Double" size="8" />
+          </RecordInfo>
+        </MetaInfo>
+      </Properties>
+      <EngineSettings Macro="BigQuery\big_query_input.yxmc" EngineDll="Macro" EngineDllEntryPoint="BigQuery\big_query_input.yxmc" />
+    </Node>
+    <Node ToolID="3">
+      <GuiSettings Plugin="AlteryxBasePluginsGui.JoinMultiple.JoinMultiple">
+        <Position x="300" y="150" />
+      </GuiSettings>
+      <Properties>
+        <Configuration>
+          <JoinByRecPos value="False" />
+          <JoinFields>
+            <JoinInfo connection="#1">
+              <Field field="K" />
+            </JoinInfo>
+            <JoinInfo connection="#3">
+              <Field field="K" />
+            </JoinInfo>
+          </JoinFields>
+          <CartesianMode>Error</CartesianMode>
+          <OutputJoinOnly value="False" />
+          <SelectConfiguration>
+            <Configuration outputConnection="Output">
+              <OrderChanged value="False" />
+              <CommaDecimal value="False" />
+              <SelectFields>
+                <SelectField field="Input_#1_K" selected="True" rename="Key" />
+                <SelectField field="Input_#1_A" selected="True" />
+                <SelectField field="Input_#3_K" selected="False" />
+                <SelectField field="Input_#3_B" selected="True" />
+                <SelectField field="*Unknown" selected="True" />
+              </SelectFields>
+            </Configuration>
+          </SelectConfiguration>
+        </Configuration>
+        <Annotation DisplayMode="0">
+          <Name />
+          <DefaultAnnotationText />
+          <Left value="False" />
+        </Annotation>
+      </Properties>
+      <EngineSettings EngineDll="AlteryxBasePluginsEngine.dll" EngineDllEntryPoint="AlteryxJoinMultiple" />
+    </Node>
+  </Nodes>
+  <Connections>
+    <Connection>
+      <Origin ToolID="2" Connection="Output" />
+      <Destination ToolID="3" Connection="Input" />
+    </Connection>
+    <Connection>
+      <Origin ToolID="1" Connection="Output" />
+      <Destination ToolID="3" Connection="Input" />
+    </Connection>
+  </Connections>
+  <Properties>
+    <Memory default="True" />
+    <GlobalRecordLimit value="0" />
+    <TempFiles default="True" />
+    <Annotation on="True" includeToolName="False" />
+    <ConvertTimes value="False" />
+    <ErrorWarningOptions>
+      <ErrorLimit value="1000" />
+    </ErrorWarningOptions>
+  </Properties>
+</AlteryxDocument>

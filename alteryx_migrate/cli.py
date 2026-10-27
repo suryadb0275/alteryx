@@ -131,7 +131,7 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("--model", help="a Databricks-served model (endpoint name, for example alteryx.default.test) for the tables the skill cannot convert by rule")
     c.add_argument("--base-url", dest="base_url", help="AI Gateway base URL (default https://<workspace>/ai-gateway/mlflow/v1); the token is DATABRICKS_TOKEN or your CLI sign-in")
     c.add_argument("--max-output-tokens", dest="max_output_tokens", type=int, default=16000)
-    c.add_argument("--decisions", help="JSON: {tool id: {mode: any | order_by, fields: [...], ascending: true}, \"_field_types\": {field: string | number | date | datetime | bool}} (answers the converter asks)")
+    c.add_argument("--decisions", help="JSON: {tool id: {mode: any | order_by, fields: [...], ascending: true}, \"_field_types\": {field: string | number | date | datetime | bool}, \"_join_inputs\": {join tool id: {\"#1\": feeding tool id}}} (answers the converter asks)")
     c.add_argument("--sql-dialect", dest="sql_dialect", choices=sorted(sqlsrc.DIALECTS), help="SQL dialect of the queries inside the workflow's input tools (BigQuery inputs are recognised by themselves)")
     c.add_argument("--source-catalog", dest="source_catalog", default="", help="Databricks catalog of the tables those queries read (default: --catalog)")
     c.add_argument("--source-schema", dest="source_schema", default="", help="Databricks schema of those tables (default: the dataset written in the query, e.g. sap_data)")
