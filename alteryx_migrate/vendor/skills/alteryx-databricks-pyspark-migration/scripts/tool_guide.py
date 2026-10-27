@@ -187,7 +187,7 @@ out = (df.withColumn(f + "_Indicator", src_is_null.cast("int"))                 
   confirm=["Mode ties; rounding of the average/median for integer fields; the type of the indicator field.", "All-NULL field; non-numeric input.", "Original field replaced in place vs separate field (option)."])
 
 g("Data Cleansing",
-  does="Cleans data: removes null rows/columns, replaces nulls, strips unwanted characters, changes case. Original tool = a macro (cleanse.yxmc) whose options are anonymous check boxes.",
+  does="Cleans data: removes null rows/columns, replaces nulls, strips unwanted characters, changes case. Original tool = a macro (Cleanse.yxmc); its questions have fixed names (wfmodel.CLEANSE_QUESTIONS) and it is converted by rule (codegen.e_cleanse).",
   settings="""Fields to cleanse. Remove Null Data: Null Rows | Null Columns (run last; counts reported). Replace Nulls: with blanks (string fields, default on) | with 0 (numeric fields, default on).
 Remove Unwanted Characters (string fields): Leading and trailing whitespace (default on) | Tabs, line breaks and duplicate whitespace (each run becomes ONE space) | All whitespace | Letters | Numbers |
 Punctuation (! " # $ % & ' ( ) * + , \\ - . / : ; < = > ? @ [ ] ^ _ ` { | } ~). Modify Case: Upper | Lower | Title.""",

@@ -415,7 +415,8 @@ def generate(wf, plan, outdir, opts=None, test_results=None):
     ext = "." + fmt
     answers = opts.get("answers") or {}
     project = PF.project_settings(answers)
-    options = {"text_match_case_insensitive": project["text_match_case_insensitive"], "ansi": project.get("ansi"), "null_safe_join": project.get("null_safe_join")}
+    options = {"text_match_case_insensitive": project["text_match_case_insensitive"], "ansi": project.get("ansi"), "null_safe_join": project.get("null_safe_join"),
+               "field_types": {str(k).lower(): str(v).lower() for k, v in (answers.get("field_types") or {}).items()}}
     os.makedirs(outdir, exist_ok=True)
     plan, (em0, info, live_data, blocked, waiting) = plan_with_ready_cuts(wf, plan, options)
     bad = set(blocked) | set(waiting)

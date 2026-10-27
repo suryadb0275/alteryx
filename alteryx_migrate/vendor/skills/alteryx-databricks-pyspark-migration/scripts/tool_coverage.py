@@ -136,7 +136,8 @@ OWN = {
     "Select Records": (REPORTED, "No parser converter, so the settings are not available."),
     "Tile": (REPORTED, NO_XML + " (the tile method - equal records, equal sum, smart, unique value, manual - is not captured)."),
     "Imputation": (REPORTED, NO_XML + "."),
-    "Data Cleansing": (REPORTED, NO_XML + " (the check boxes are anonymous in the macro)."),
+    "Data Cleansing": (CONVERTED, "The macro Cleanse.yxmc: its questions are decoded by the names the macro gives them (Check Box (15) = leading/trailing whitespace ...); "
+                                  "the steps run in the macro's order with its own expressions. A field whose type the workflow does not state is typed at run time, or by the user for SQL."),
     "Data Cleanse Pro": (REPORTED, "Macro-based; supply the .yxmc."),
     "Auto Field": (CONVERTED, "Alteryx only shrinks the field types to the smallest that fit; the data does not change, so the rows pass through (the type change is noted)."),
     "Multi-Field Binning": (REPORTED, "No parser converter."),

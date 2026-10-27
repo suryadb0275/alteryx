@@ -196,7 +196,7 @@ In a terminal it first reads the workflow, then asks. Press Enter to accept the 
 
 | Option | Meaning |
 |---|---|
-| `--out <folder>` | local or Volume folder (default `.\output\<workflow>\`) |
+| `--out <folder>` | parent folder, local or Volume; each workflow gets its own `<workflow>\` subfolder (default `.\output\<workflow>\`) |
 | `--workspace-dir <path>` | write into this workspace folder instead; `--profile` picks the CLI profile |
 | `--catalog`, `--schema` | where the tables live (also env `CATALOG`, `SCHEMA`); optional |
 | `--format pyspark\|sql\|both` | which code to write |

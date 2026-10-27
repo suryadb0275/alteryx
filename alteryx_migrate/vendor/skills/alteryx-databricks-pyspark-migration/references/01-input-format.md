@@ -35,7 +35,7 @@ Derived from the real file `example/mapping.json` (4.4 MB, 1,533 tools). The loa
 | `Transpose.data_fields` contains the key fields | overlap would duplicate keys | **blocked** |
 | `expressions[].status == "failed"` (61) for every `==` | converter parser has no `==` | ignored: expressions are re-translated from the original text |
 | `spark_sql` hints present | converter output, unverified | **not used** |
-| Macro `cleanse.yxmc` x75 (Alteryx Data Cleansing tool: anchors `Input2` -> `Output26`) | no converter; options are anonymous check boxes | **unsupported** until the `.yxmc` or the option mapping is supplied |
+| Macro `cleanse.yxmc` x75 (Alteryx Data Cleansing tool: anchors `Input2` -> `Output26`) | `<Value name="Check Box (n)">` questions with fixed names in the macro | **converted** (`DataCleansingMacroNode`, see `wfmodel.CLEANSE_QUESTIONS`) |
 | `ReadNode.connection_string = "aka:D1"` | Alteryx connection alias | placeholder in `00_config` (`<SET: ...>`) |
 
 ## Reading the original XML (`--yxmd`)

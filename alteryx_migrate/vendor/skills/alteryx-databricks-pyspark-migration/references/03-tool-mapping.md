@@ -29,7 +29,7 @@ Anchor names are confirmed in `designer-tool-reference.yaml`. "Review" = *Requir
 | Dynamic Rename (Formula mode) | rename fields by a formula over the field name | `toDF(*names)` where the new names are computed once from the formula (`spark.range(1).select(formula(F.lit(name)))`) | other modes (FirstRow, right input) are blocked | High | `test_rename_fields_applies_a_formula_to_field_names` |
 | Generate Rows | init / condition / loop expressions create rows | `F.explode(F.sequence(..))` for `init; [f] <= bound; DateTimeAdd([f],n,unit)` or `[f]+n` | other loop shapes are blocked; confirm boundary/empty-range behaviour | Review | `test_generate_rows_dates_and_numbers` |
 | Block Until Done (WorkflowControl) | forces execution order | pass-through | data unchanged | High | - |
-| Data Cleansing macro | trim/case/null handling per check box | **unsupported** | options are anonymous check boxes in the macro; obtain the `.yxmc`, then add one reusable `cleanse` helper and map it with `custom_python` | unsupported | - |
+| Data Cleansing macro | null rows/columns, case, blanks / 0 for NULL, unwanted characters - in the macro's order | **converted** | questions decoded by their names in Cleanse.yxmc (`wfmodel.CLEANSE_QUESTIONS`); string steps on string fields, 0 on numeric fields; unknown field types are resolved at run time (PySpark) or asked (SQL, `answers.field_types`) | converted | - |
 
 ## Multi-input and grain-changing tools
 | Tool | Behaviour | PySpark | Caveats | Status | Test |

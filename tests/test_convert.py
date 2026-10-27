@@ -1,4 +1,5 @@
 import json
+import re
 
 import pytest
 
@@ -72,9 +73,16 @@ def test_spark_sql_notebooks_are_written_when_the_input_columns_are_known(tmp_pa
 
 
 def test_without_input_columns_the_sql_cell_says_why_and_points_to_the_pyspark(tmp_path):
-    pipeline.convert_workflow(FLOW, tmp_path, "main", "s", {"20": {"mode": "any"}})
-    text = _cells(tmp_path / "03_gold_sql.ipynb")
+    flow = tmp_path / "unique_flow.yxmd"                                 # without its <MetaInfo>, nothing names the columns of `select *`
+    flow.write_text(re.sub(r"\s*<MetaInfo .*?</MetaInfo>", "", FLOW.read_text(encoding="utf-8"), flags=re.S), encoding="utf-8")
+    pipeline.convert_workflow(flow, tmp_path / "out", "main", "s", {"20": {"mode": "any"}})
+    text = _cells(tmp_path / "out" / "03_gold_sql.ipynb")
     assert "NO SQL FOR THIS TABLE" in text and "bronze_customer_master_v" in text and "03_gold.ipynb" in text and "schemas" in text
+
+
+def test_the_input_columns_and_types_the_workflow_stores_give_sql(tmp_path):
+    pipeline.convert_workflow(FLOW, tmp_path, "main", "s", {"20": {"mode": "any"}})       # the BigQuery input's <MetaInfo> names its columns
+    assert "NO SQL" not in _cells(tmp_path / "03_gold_sql.ipynb")
 
 
 def test_input_columns_are_read_from_the_tables_when_a_lookup_is_given(tmp_path):
@@ -110,4 +118,4 @@ def test_without_a_catalog_or_schema_the_table_names_are_not_qualified(tmp_path,
     sql = _cells(tmp_path / "03_gold_sql.ipynb")
     assert "CREATE TABLE gold_customer_master_v_selected AS" in sql and "FROM bronze_customer_master_v" in sql
     assert cli.main(["convert", str(FLOW), "--out", str(tmp_path / "o2")]) in (cli.OK, cli.OPEN)         # no --catalog / --schema needed on the command line
-    assert (tmp_path / "o2" / "00_config.ipynb").exists()
+    assert (tmp_path / "o2" / FLOW.stem / "00_config.ipynb").exists()

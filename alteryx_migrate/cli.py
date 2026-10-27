@@ -60,7 +60,7 @@ def cmd_convert(args, console: interactive.Console | None = None) -> int:
     status = OK
     for wf in workflows:
         if args.out:
-            target = Path(args.out) / wf.stem if many else Path(args.out)
+            target = Path(args.out) / wf.stem
         elif args.workspace_dir:
             target = Path(tempfile.mkdtemp(prefix="alteryx_out_"))                  # only a staging folder: the notebooks are uploaded to the workspace
         else:
@@ -121,7 +121,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub = p.add_subparsers(dest="command", required=True)
     c = sub.add_parser("convert", help="convert workflows into notebooks (00_config, 01_bronze, 02_silver, 03_gold)")
     c.add_argument("input", help="a .yxmd / .yxzp file or a folder that holds them: on your computer, /Volumes/<catalog>/<schema>/<volume>/..., or /Workspace/...")
-    c.add_argument("--out", help="folder for the notebooks (a local folder or a Volume folder). Default: ./output/<workflow name>/ inside the folder you run the command from")
+    c.add_argument("--out", help="parent folder for the notebooks (a local folder or a Volume folder); each workflow gets its own <workflow name> subfolder. Default: ./output/<workflow name>/ inside the folder you run the command from")
     c.add_argument("--workspace-dir", dest="workspace_dir", help="write the notebooks into this Databricks workspace folder, e.g. /Workspace/Users/<you>/migrations")
     c.add_argument("--profile", help="Databricks CLI profile for --workspace-dir (default: environment authentication)")
     c.add_argument("--catalog", default="", help="catalog of the tables the notebooks read and write (optional; env CATALOG). Without it the names are not qualified and the notebook uses its current catalog")
@@ -130,8 +130,8 @@ def build_parser() -> argparse.ArgumentParser:
                                      "with --workspace-dir they are read from the tables in Unity Catalog)")
     c.add_argument("--model", help="a Databricks-served model (endpoint name, for example alteryx.default.test) for the tables the skill cannot convert by rule")
     c.add_argument("--base-url", dest="base_url", help="AI Gateway base URL (default https://<workspace>/ai-gateway/mlflow/v1); the token is DATABRICKS_TOKEN or your CLI sign-in")
-    c.add_argument("--max-output-tokens", dest="max_output_tokens", type=int, default=4096)
-    c.add_argument("--decisions", help="JSON: {tool id: {mode: any | order_by, fields: [...], ascending: true}} (answers the converter asks)")
+    c.add_argument("--max-output-tokens", dest="max_output_tokens", type=int, default=16000)
+    c.add_argument("--decisions", help="JSON: {tool id: {mode: any | order_by, fields: [...], ascending: true}, \"_field_types\": {field: string | number | date | datetime | bool}} (answers the converter asks)")
     c.add_argument("--sql-dialect", dest="sql_dialect", choices=sorted(sqlsrc.DIALECTS), help="SQL dialect of the queries inside the workflow's input tools (BigQuery inputs are recognised by themselves)")
     c.add_argument("--source-catalog", dest="source_catalog", default="", help="Databricks catalog of the tables those queries read (default: --catalog)")
     c.add_argument("--source-schema", dest="source_schema", default="", help="Databricks schema of those tables (default: the dataset written in the query, e.g. sap_data)")

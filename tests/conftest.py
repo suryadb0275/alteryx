@@ -30,3 +30,13 @@ def spark():
                .config("spark.sql.session.timeZone", "UTC").getOrCreate())
     yield session
     session.stop()
+
+
+@pytest.fixture(autouse=True)
+def _no_local_settings(monkeypatch, request):
+    """A developer's .env / environment (MODEL, CATALOG, DATABRICKS_*...) must not change what the tests expect."""
+    from alteryx_migrate import env
+    if request.module.__name__ != "test_env":                  # test_env tests the loader itself
+        monkeypatch.setattr(env, "load", lambda *a, **k: [])
+    for name in ("MODEL", "CATALOG", "SCHEMA", "SQL_DIALECT", "SOURCE_CATALOG", "SOURCE_SCHEMA", "DATABRICKS_HOST", "DATABRICKS_TOKEN"):
+        monkeypatch.delenv(name, raising=False)

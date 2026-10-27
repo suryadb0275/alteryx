@@ -21,6 +21,7 @@ import pretty
 import wfmodel as M
 
 JOIN_TYPES = {"string", "number", "bool", "date", "datetime"}
+NUMERIC_DTYPES = ("tinyint", "smallint", "int", "bigint", "float", "double")         # Spark dtypes of the Alteryx numeric types (Byte .. Double, plus decimal(p,s))
 SEVERITY = {"not_applicable": 0, "high_confidence": 1, "requires_review": 2, "blocked": 3, "unsupported": 4}
 
 CATEGORY = {"v_wstring": "string", "v_string": "string", "string": "string", "wstring": "string", "time": "string",
@@ -178,7 +179,7 @@ class Emitter:
               "multirow": "win", "select": "sel", "sort": "srt", "unique": "uniq", "join": "jn", "joinmulti": "jnm",
               "union": "un", "append": "app", "summarize": "agg", "crosstab": "xtab", "transpose": "trn",
               "recordid": "rid", "runningtotal": "rt", "text2cols": "split", "dynrename": "ren", "datetime": "dt",
-              "spatial": "geo", "predictive": "ml", "unsupported": "mac"}
+              "spatial": "geo", "predictive": "ml", "unsupported": "mac", "cleanse": "cln"}
 
     def var(self, stream):
         """Variable name for a stream: the table name when read from a table in this unit, else a readable step name."""
@@ -240,7 +241,17 @@ class Emitter:
 
     # ------------------------------------------------------------------ type / order propagation
     def t_in(self, stream):
-        return dict(self.types.get(stream, {})) if stream else {}
+        types = dict(self.types.get(stream, {})) if stream else {}
+        hints = self.options.get("field_types") or {}
+        for name, kind in types.items():
+            if kind == "unknown" and hints.get(name):
+                types[name] = hints[name]
+        return types
+
+    def need_types(self, node, names):
+        """Fields whose type the workflow does not state and that a choice depends on: the app asks the user for them (answers.field_types)."""
+        have = node.setdefault("_types_needed", [])
+        have += [n for n in names if n not in have]
 
     def set_out(self, nid, anchors, types=None, order=None):
         for a in anchors:
@@ -317,6 +328,8 @@ class Emitter:
                 r.notes.append(m)
         for m in res.reviews:
             r.need("requires_review", m)
+        if res.untyped:
+            self.need_types(self.wf.nodes[r.nid], res.untyped)
         return res
 
     # ------------------------------------------------------------------ sources
@@ -1012,6 +1025,85 @@ class Emitter:
         r.need("requires_review", "Generate Rows implemented with sequence(); confirm boundary and empty-range behaviour")
         types[out.lower()] = "string" if m_loop else "number"
         self.set_out(nid, ["Output"], types, None)
+
+    # Data Cleansing (Cleanse.yxmc): the steps, their order and their expressions are those of the macro itself. Character classes use Java's
+    # Unicode mode (?U) because the macro's Boost [[:alpha:]] / [[:punct:]] / \s match Unicode characters too.
+    CLEANSE_STEPS = [
+        ("remove_letters", "letters", r"(?U)\p{Alpha}", ""),
+        ("remove_numbers", "numbers", r"[0-9\x{FF10}-\x{FF19}]", ""),
+        ("remove_punctuation", "punctuation", r"(?U)\p{Punct}|[$+<=>^`|~\x{FF01}-\x{FF0F}\x{FF1A}-\x{FF20}\x{FF3B}-\x{FF40}\x{FF5B}-\x{FF5E}\x{2200}-\x{22FF}]", ""),
+        ("collapse_whitespace", "tabs, line breaks and duplicate whitespace", r"(?U)\s+", " "),
+        ("trim", "leading and trailing whitespace", r"^[ \t\n\r\x{00A0}]+|[ \t\n\r\x{00A0}]+$", ""),
+        ("remove_all_whitespace", "all whitespace", r"(?U)\s+", ""),
+    ]
+
+    def e_cleanse(self, nid, node, ins, anchors, r):
+        """Data Cleansing: null rows, null columns, case, blanks for NULL strings, unwanted characters, 0 for NULL numbers - in the macro's order."""
+        st = self.first_in(ins)
+        types = self.t_in(st)
+        o = node.get("cleanse") or {}
+        out = anchors[0]
+        src, v = self.var(st), self.var((nid, out))
+        cur = src
+        r.orig.append("Data Cleansing: " + ", ".join(k for k, on in o.items() if on is True) + (f"; fields {o.get('fields')}" if o.get("fields") else ""))
+
+        def step(code):
+            nonlocal cur
+            r.lines.append(f"{v} = {code}")
+            cur = v
+
+        if o.get("remove_null_rows"):
+            r.lines.append(f"{v}_keep = F.lit(False)")
+            r.lines.append(f"for _c in {cur}.columns:")
+            r.lines.append(f"    {v}_keep = {v}_keep | F.col(_c).isNotNull()")
+            step(f"{cur}.filter({v}_keep)")
+            r.notes.append("Remove null rows: a row is dropped only when every field is NULL (an empty string is a value)")
+        if o.get("remove_null_columns"):
+            r.lines.append(f"{v}_counts = {cur}.agg(*[F.count(F.col(_c)).alias(_c) for _c in {cur}.columns]).first().asDict()")
+            step(f"{cur}.select(*[_c for _c in {cur}.columns if {v}_counts[_c] > 0])")
+            r.notes.append("Remove null columns: a field is dropped only when all its values are NULL; this depends on the data, so Spark SQL cannot express it")
+        fields = list(o.get("fields") or [])
+        kind_of = {f: types.get(f.lower(), "unknown") for f in fields}             # t_in already holds the user's answers (answers.field_types)
+        unknown = [f for f, k in kind_of.items() if k in ("unknown", "")]
+        strings = [f for f in fields if kind_of[f] == "string"]
+        numbers = [f for f in fields if kind_of[f] == "number"]
+        others = [f for f in fields if f not in strings and f not in numbers and f not in unknown]
+        if others:
+            r.notes.append(f"Data Cleansing leaves {others} unchanged: the macro only cleans string fields and replaces NULL with 0 in numeric fields")
+        self.need_types(node, unknown)                       # the app asks the user, so that Spark SQL can be written too
+        if unknown:                                          # the macro itself picks string / numeric fields by their type at run time: so does this code
+            r.lines.append(f"{v}_types = dict({cur}.dtypes)")
+            r.lines.append(f"{v}_strings = {strings!r} + [_c for _c in {unknown!r} if {v}_types[_c] == 'string']")
+            r.lines.append(f"{v}_numbers = {numbers!r} + [_c for _c in {unknown!r} if {v}_types[_c] in {NUMERIC_DTYPES!r} or {v}_types[_c].startswith('decimal')]")
+            strings, numbers = f"{v}_strings", f"{v}_numbers"
+            r.notes.append(f"Data Cleansing: the type of {unknown} is not in the workflow, so the code picks string / numeric fields at run time like the macro does "
+                           "(Spark SQL needs the types up front: answer the type question in the terminal to get SQL for this table)")
+
+        def per_field(cols, expr, what):
+            if cols:
+                listed = cols if isinstance(cols, str) else repr(cols)
+                step(f"{cur}.withColumns({{_c: {expr} for _c in {listed}}})")
+                r.notes.append(f"Data Cleansing: {what} in {cols if not isinstance(cols, str) else 'the ' + cols.rsplit('_', 1)[-1] + ' fields'}")
+
+        if o.get("modify_case"):
+            fn = {"upper": "F.upper", "lower": "F.lower", "title": "F.initcap"}[o["case"]]
+            per_field(strings, f"{fn}(F.col(_c))", f"{o['case']} case")
+            if o["case"] == "title":
+                r.need("requires_review", "Title case: Spark initcap splits words on whitespace only; Alteryx TitleCase also capitalises after punctuation - compare names such as O'NEIL")
+        if o.get("blanks_for_null_strings"):
+            per_field(strings, "F.coalesce(F.col(_c), F.lit(''))", "NULL replaced with an empty string")
+        for key, what, pattern, repl in self.CLEANSE_STEPS:
+            if o.get(key):
+                per_field(strings, f"F.regexp_replace(F.col(_c), {pattern!r}, {repl!r})", f"remove {what}")
+        if o.get("zero_for_null_numbers"):
+            per_field(numbers, "F.coalesce(F.col(_c), F.lit(0))", "NULL replaced with 0")
+        if cur == src:
+            self.alias[(nid, out)] = src
+            r.notes.append("Data Cleansing: no option changes the selected fields, the rows pass through")
+        out_types = types
+        if o.get("remove_null_columns"):
+            out_types = {}                                       # which fields remain is known only at run time
+        self.set_out(nid, anchors, out_types, self.order.get(st))
 
     def e_predictive(self, nid, node, ins, anchors, r):
         r.need("unsupported", f"{node.get('model_type')}: predictive tool - re-implement the model and compare; no equivalence assumed")

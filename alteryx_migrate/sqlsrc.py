@@ -10,8 +10,19 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+import logging
+
 import sqlglot
 from sqlglot import exp
+
+
+class _Collect(logging.Handler):
+    def __init__(self):
+        super().__init__(logging.WARNING)
+        self.messages: list = []
+
+    def emit(self, record):
+        self.messages.append(record.getMessage())
 
 DIALECTS = {"bigquery": "BigQuery", "tsql": "SQL Server (T-SQL)", "oracle": "Oracle", "postgres": "PostgreSQL", "mysql": "MySQL", "snowflake": "Snowflake", "spark": "Spark / Databricks SQL"}
 BY_PLUGIN = (("big_query", "bigquery"), ("bigquery", "bigquery"), ("snowflake", "snowflake"), ("postgres", "postgres"), ("oracle", "oracle"), ("mysql", "mysql"))
@@ -131,7 +142,14 @@ def translate(query: str, dialect: str, mapper) -> Translation:
         out.error = "no Databricks table is known for: " + ", ".join(sorted(set(missing)))
         return out
     tree = _fix_types(tree, dialect, out.notes)
-    out.sql = tree.sql(dialect="spark", pretty=True)
+    logger = logging.getLogger("sqlglot")                                       # sqlglot warns on stderr for what Spark SQL cannot express (e.g. recursive CTEs): keep it with the query
+    collected = _Collect()
+    logger.addHandler(collected)
+    try:
+        out.sql = tree.sql(dialect="spark", pretty=True)
+    finally:
+        logger.removeHandler(collected)
+    out.notes += [f"sqlglot: {m} - review this query by hand" for m in dict.fromkeys(collected.messages)]
     out.tables = seen
     if dialect != "spark":
         out.notes.append(f"translated from {DIALECTS.get(dialect, dialect)} to Spark SQL by sqlglot: check dialect differences (date functions and time zone, NULL ordering, string/number casts)")

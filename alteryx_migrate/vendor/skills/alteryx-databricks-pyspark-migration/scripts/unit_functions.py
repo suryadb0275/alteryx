@@ -48,9 +48,10 @@ def apply_schemas(wf, plan, schemas):
         if key not in plan.bronze or not spec:
             continue
         items = list(spec.items()) if isinstance(spec, dict) else [(n, "") for n in spec]
-        info = [{"name": n, **({"type": alteryx_type(t)} if alteryx_type(t) else {})} for n, t in items]
         for nid in plan.bronze[key]["nodes"]:
-            wf.nodes[nid]["field_info"] = [dict(f) for f in info]
+            known = {str(f.get("name", "")).lower(): f for f in wf.nodes[nid].get("field_info") or [] if f.get("type")}     # types the workflow states (MetaInfo)
+            wf.nodes[nid]["field_info"] = [{"name": n, **({"type": alteryx_type(t)} if alteryx_type(t) else
+                                                           {k: v for k, v in known.get(n.lower(), {}).items() if k != "name"})} for n, t in items]
 
 
 def bronze_columns(wf, plan, key):
@@ -125,7 +126,8 @@ def build(wf, plan, answers=None, test_results=None):
     project = PF.project_settings(answers)
     apply_schemas(wf, plan, answers.get("schemas"))
     options = {"text_match_case_insensitive": project["text_match_case_insensitive"], "ansi": project.get("ansi"),
-               "null_safe_join": project.get("null_safe_join")}
+               "null_safe_join": project.get("null_safe_join"),
+               "field_types": {str(k).lower(): str(v).lower() for k, v in (answers.get("field_types") or {}).items()}}
     plan, (em0, info, live_data, blocked, waiting) = NB.plan_with_ready_cuts(wf, plan, options)
     bad = set(blocked) | set(waiting)
     em = C.Emitter(wf, plan, options)

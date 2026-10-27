@@ -141,8 +141,8 @@ class ConverterRegistry:
                     macro_file = macro_path.strip()
             detail = f"Macro ({macro_file})" if macro_file else "Macro"
             return (
-                f"No converter for tool type: {detail} — convert manually, or re-run with "
-                "--expand-macros to inline it if the .yxmc file is available"
+                f"No converter for tool type: {detail} — convert manually, or run the converter in a terminal "
+                "and describe what the macro does (or give the path of its .yxmc file) when it asks"
             )
         return f"No converter for tool type: {parsed_node.tool_type}"
 

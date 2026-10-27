@@ -38,9 +38,9 @@ def test_the_converter_asks_which_code_where_and_which_row_then_converts(tmp_pat
     assert code == cli.OK and not script.answers
     asked = "\n".join(script.prompts + script.lines)
     assert "Which code do you need?" in asked and "Which catalog holds the tables" in asked and "which one is first" in asked and "In which Databricks catalog are those source tables?" in asked
-    assert (tmp_path / "03_gold.ipynb").exists() and not (tmp_path / "03_gold_sql.ipynb").exists()                    # only the code that was asked for
-    assert "CREATE OR REPLACE VIEW" in cells(tmp_path / "01_bronze.ipynb") and "main.sap_data.Customer_Master_V" in cells(tmp_path / "01_bronze.ipynb")
-    assert "main.s.bronze_customer_master_v" in cells(tmp_path / "00_config.ipynb") and "dropDuplicates" in cells(tmp_path / "03_gold.ipynb")
+    assert (tmp_path / "unique_flow" / "03_gold.ipynb").exists() and not (tmp_path / "unique_flow" / "03_gold_sql.ipynb").exists()                    # only the code that was asked for
+    assert "CREATE OR REPLACE VIEW" in cells(tmp_path / "unique_flow" / "01_bronze.ipynb") and "main.sap_data.Customer_Master_V" in cells(tmp_path / "unique_flow" / "01_bronze.ipynb")
+    assert "main.s.bronze_customer_master_v" in cells(tmp_path / "unique_flow" / "00_config.ipynb") and "dropDuplicates" in cells(tmp_path / "unique_flow" / "03_gold.ipynb")
 
 
 def test_a_tool_without_a_converter_is_described_in_english_and_the_words_reach_the_model(tmp_path, monkeypatch):
@@ -57,14 +57,14 @@ def test_a_tool_without_a_converter_is_described_in_english_and_the_words_reach_
     run([str(FIXTURES / "sample_flow.yxmd"), "--out", str(tmp_path)], script)
     assert "What should this tool do in this workflow?" in "\n".join(script.prompts)
     assert prompts and "keep only the first ten rows of each customer" in prompts[0] and "what_the_user_says_each_tool_must_do" in prompts[0]
-    gold = cells(tmp_path / "03_gold.ipynb")
+    gold = cells(tmp_path / "sample_flow" / "03_gold.ipynb")
     assert "AI-WRITTEN by the model `fake-model`" in gold and ".limit(10)" in gold
 
 
 def test_without_a_model_the_words_stay_in_the_hand_off_for_a_person_or_another_ai(tmp_path):
     script = Script("1", "", "", "", "keep only the first ten rows of each customer", "")                 # no model
     run([str(FIXTURES / "sample_flow.yxmd"), "--out", str(tmp_path)], script)
-    gold = cells(tmp_path / "03_gold.ipynb")
+    gold = cells(tmp_path / "sample_flow" / "03_gold.ipynb")
     assert "UPDATE REQUIRED - tool [20] Sample" in gold and "What the user asked for:" in gold and "keep only the first ten rows of each customer" in gold
 
 
@@ -76,9 +76,9 @@ def test_an_embedded_python_script_is_ported_after_the_user_agrees_and_describes
     text = "\n".join(script.prompts + script.lines)
     assert "What should I do with it?" in text and "Keep the pandas code as it is" in text and "Should the threshold 10 be inclusive" in text
     assert "sales are doubled" in fake.prompts[0] and "inclusive" in fake.prompts[1]
-    silver = cells(tmp_path / "02_silver.ipynb")
+    silver = cells(tmp_path / "python_flow" / "02_silver.ipynb")
     assert "from utils import python_tool_17" in silver and "UPDATE REQUIRED" not in silver
-    component = (tmp_path / "utils" / "python_tool_17.py").read_text(encoding="utf-8")
+    component = (tmp_path / "python_flow" / "utils" / "python_tool_17.py").read_text(encoding="utf-8")
     assert "AI-WRITTEN" in component and "df.withColumn('Amount2'" in component
     assert code == cli.OK or code == cli.OPEN
 
@@ -88,7 +88,7 @@ def test_yes_asks_nothing(tmp_path):
         raise AssertionError("no question expected")
     args = cli.build_parser().parse_args(["convert", str(FIXTURES / "unique_flow.yxmd"), "--out", str(tmp_path), "--yes", "--decisions", str(tmp_path / "d.json")])
     (tmp_path / "d.json").write_text('{"20": {"mode": "any"}}', encoding="utf-8")
-    assert cli.cmd_convert(args, interactive.Console(never, lambda *a, **k: None)) == cli.OK and (tmp_path / "03_gold.ipynb").exists()
+    assert cli.cmd_convert(args, interactive.Console(never, lambda *a, **k: None)) == cli.OK and (tmp_path / "unique_flow" / "03_gold.ipynb").exists()
 
 
 def test_a_missing_macro_is_asked_about_and_its_description_goes_to_the_tool():
@@ -106,7 +106,7 @@ def test_the_original_pandas_code_is_kept_in_a_component_file_without_any_model(
     script = Script("3", "", "", "", "1")                                      # both; no catalog; python: option 1 (keep the pandas code)
     code = run([str(FIXTURES / "python_flow.yxmd"), "--out", str(tmp_path)], script)
     assert not script.answers and code in (cli.OK, cli.OPEN)
-    component = (tmp_path / "utils" / "python_tool_17.py").read_text(encoding="utf-8")
+    component = (tmp_path / "python_flow" / "utils" / "python_tool_17.py").read_text(encoding="utf-8")
     assert "df['Amount2'] = df['Amount'] * 2" in component and "df_big = df[df['Amount'] > 10]" in component and "def run(spark, input_1):" in component   # the author's lines, unchanged
-    silver = cells(tmp_path / "02_silver.ipynb")
+    silver = cells(tmp_path / "python_flow" / "02_silver.ipynb")
     assert "from utils import python_tool_17" in silver and "python_tool_17.run(spark, bronze_sales_v)" in silver and "UPDATE REQUIRED" not in silver

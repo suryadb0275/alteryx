@@ -50,6 +50,7 @@ NODE_SPECS = {
     "DistanceNode": dict(kind="spatial", order="preserve"),
     "SpatialMatchNode": dict(kind="spatial", order="breaks"),
     "PredictiveModelNode": dict(kind="predictive", order="breaks"),
+    "DataCleansingMacroNode": dict(kind="cleanse", order="preserve"),
     "UnsupportedNode": dict(kind="unsupported", order="breaks"),
 }
 NO_DATA_KINDS = {"browse", "comment"}
@@ -171,6 +172,7 @@ def load_workflow(path: str, overrides: Optional[dict] = None, yxmd: Optional[st
             nodes[int(nid)].update({k: v for k, v in ov.items()})
             nodes[int(nid)]["_override_keys"] = sorted(ov)
     _promote_external_sources(wf)
+    _promote_data_cleansing(wf)
     wf.topo = _topo(wf)
     return wf
 
@@ -235,6 +237,56 @@ def _promote_external_sources(wf):
             table = str(flat["workbookName"]) + ("" if sheet.lower() in ("", "sheet1") else f" {sheet}")
         n.update(node_type="ReadNode", source_type="external", query=query, table_name=table, file_path="", file_format="",
                  connection_string=str(n.get("original_plugin_name") or ""), converted_from="UnsupportedNode")
+
+
+# The Data Cleansing tool is Alteryx's own macro Cleanse.yxmc (bin/RuntimeData/Macros). Its settings are interface questions with fixed names; the
+# labels below are the <Description> of each question in that macro, so a check box is never interpreted by position or guesswork.
+CLEANSE_QUESTIONS = {
+    "Check Box (135)": "remove_null_rows",            # Remove null rows
+    "Check Box (136)": "remove_null_columns",         # Remove null columns
+    "List Box (11)": "fields",                        # Select Fields to Cleanse
+    "Check Box (84)": "blanks_for_null_strings",      # Replace with Blanks (String Fields)
+    "Check Box (117)": "zero_for_null_numbers",       # Replace with 0 (Numeric Fields)
+    "Check Box (15)": "trim",                         # Leading and Trailing Whitespace
+    "Check Box (109)": "collapse_whitespace",         # Tabs, Line Breaks, and Duplicate Whitespace
+    "Check Box (122)": "remove_all_whitespace",       # All Whitespace
+    "Check Box (53)": "remove_letters",               # Letters
+    "Check Box (58)": "remove_numbers",               # Numbers
+    "Check Box (70)": "remove_punctuation",           # Punctuation
+    "Check Box (77)": "modify_case",                  # Modify Case
+    "Drop Down (81)": "case",                         # upper | lower | title
+}
+
+
+def cleanse_options(cfg: dict) -> Optional[dict]:
+    """The Data Cleansing options from the macro call's <Configuration>, or None when a setting is not one the macro defines."""
+    values = cfg.get("Value") if isinstance(cfg, dict) else None
+    values = [values] if isinstance(values, dict) else values
+    if not isinstance(values, list):
+        return None
+    raw = {v.get("@name"): (v.get("#text") or "") for v in values if isinstance(v, dict)}
+    if not raw or any(k not in CLEANSE_QUESTIONS for k in raw):
+        return None
+    opts = {key: str(raw.get(name, "")).strip().lower() == "true" for name, key in CLEANSE_QUESTIONS.items() if name.startswith("Check Box")}
+    opts["fields"] = re.findall(r'"((?:[^"]|"")*)"', raw.get("List Box (11)", ""))
+    opts["fields"] = [f.replace('""', '"') for f in opts["fields"]]
+    opts["case"] = str(raw.get("Drop Down (81)") or "").strip().lower()
+    if opts["modify_case"] and opts["case"] not in ("upper", "lower", "title"):
+        return None
+    return opts
+
+
+def _promote_data_cleansing(wf):
+    """A call of the Data Cleansing macro (Cleanse.yxmc) becomes a DataCleansingMacroNode with named options (see CLEANSE_QUESTIONS)."""
+    for nid, n in wf.nodes.items():
+        if n["node_type"] != "UnsupportedNode":
+            continue
+        macro = str(n.get("original_plugin_name") or "").lower().replace("\\", "/").rsplit("/", 1)[-1]
+        if macro not in ("macro:cleanse.yxmc", "cleanse.yxmc"):
+            continue
+        opts = cleanse_options(n.get("original_configuration") or {})
+        if opts is not None:
+            n.update(node_type="DataCleansingMacroNode", original_tool_type="Data Cleansing", cleanse=opts, converted_from="UnsupportedNode")
 
 
 def _topo(wf: Workflow):
@@ -414,7 +466,7 @@ def step_detail(wf: Workflow, bronze_of: dict, nid: int, anchor: str = "Output")
         return snake(re.sub(r"(?i)^macro:|\.yxmc$|_v\d+(\.\d+)*$", "", label), 20)
     return {"multifield": "adjusted", "select": "selected", "sort": "sorted", "union": "combined", "append": "appended",
             "crosstab": "pivot", "transpose": "unpivoted", "recordid": "indexed", "runningtotal": "running_total",
-            "text2cols": "split", "dynrename": "renamed", "datetime": "dated", "countrecords": "record_count", "autofield": "fitted", "spatial": "geo", "predictive": "forecast",
+            "text2cols": "split", "dynrename": "renamed", "cleanse": "cleansed", "datetime": "dated", "countrecords": "record_count", "autofield": "fitted", "spatial": "geo", "predictive": "forecast",
             "literal": ""}.get(k, k)
 
 

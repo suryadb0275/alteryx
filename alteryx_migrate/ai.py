@@ -96,7 +96,7 @@ class Client:
     base_url: str
     model: str
     headers: object = field(repr=False)
-    max_output_tokens: int = 4096
+    max_output_tokens: int = 16000
     timeout: int = 120
     retries: int = 3
     alt_bases: tuple = ()                            # further doors to try when the first does not know the model
@@ -235,9 +235,19 @@ def user_prompt(chunk: dict, slim_nodes: list, details: dict) -> str:
 
 def extract_code(text: str) -> str:
     blocks = re.findall(r"```(?:python|py)?\s*\n(.*?)```", text, flags=re.S)
-    if not blocks:
-        raise AIError("The model reply had no code block.")
-    return max(blocks, key=len).strip("\n") + "\n"
+    if blocks:
+        return max(blocks, key=len).strip("\n") + "\n"
+    open_fence = re.search(r"```(?:python|py)?\s*\n(.*)", text, flags=re.S)         # a reply cut off before its closing fence: the repair round reports the syntax error
+    if open_fence:
+        return open_fence.group(1).strip("\n") + "\n"
+    try:                                                                            # the whole reply is code without a fence
+        ast.parse(text)
+        if text.strip():
+            return text.strip("\n") + "\n"
+    except SyntaxError:
+        pass
+    start = redact((text or "").strip().replace("\n", " "))[:200]
+    raise AIError(f"The model reply had no code block (it may have been cut off: raise --max-output-tokens). The reply began: {start!r}")
 
 
 def problems(code: str, table: str) -> list:

@@ -37,6 +37,7 @@ class Result:
     notes: list = field(default_factory=list)      # informational semantic caveats
     reviews: list = field(default_factory=list)    # items that force "Requires review"
     fields: list = field(default_factory=list)     # input field names referenced
+    untyped: list = field(default_factory=list)    # fields whose unknown type left a choice to run time (e.g. '+' = concat or add)
 
 
 # ----------------------------------------------------------------------------- lexer
@@ -316,6 +317,7 @@ class _Gen:
         self.current = current_field
         self.row_ref = row_ref
         self.notes, self.reviews, self.fields = [], [], []
+        self.untyped = []
 
     def note(self, msg):
         if msg not in self.notes:
@@ -430,6 +432,10 @@ class _Gen:
                 return f"({l} + {r})", NUMBER
             self.note("'+' operand types unknown at generation time: concat vs add is decided from the DataFrame "
                       "schema when the plan is built.")
+            for x, xt in ((l, lt), (r, rt)):
+                for name in re.findall(r"F\.col\('([^']+)'\)", x) if xt == UNKNOWN else []:
+                    if name not in self.untyped:
+                        self.untyped.append(name)
             is_text = " or ".join(f"isinstance({self.df_var}.select({x}).schema[0].dataType, StringType)" for x in (l, r))
             return (f"(F.concat({l}.cast('string'), {r}.cast('string')) if {is_text} else {l} + {r})"), UNKNOWN
         if op == "/":
@@ -870,7 +876,7 @@ def translate(expr: str, *, field_types: Optional[dict] = None, current_field: O
     if parser.mixed_bool_chain:
         gen.review("Unparenthesised mix of AND and OR: Alteryx applies equal precedence left-to-right; "
                    "emitted grouping follows that rule - confirm intent")
-    return Result(code=code, type=typ, notes=gen.notes, reviews=gen.reviews, fields=gen.fields)
+    return Result(code=code, type=typ, notes=gen.notes, reviews=gen.reviews, fields=gen.fields, untyped=gen.untyped)
 
 
 def referenced_fields(expr: str) -> list:

@@ -40,7 +40,10 @@ def mapping_defaults(inputs: dict, outputs: list, catalog: str, schema: str) -> 
 
 def decision_lines(choices: dict) -> list:
     lines = []
-    for tool, c in sorted((choices or {}).items(), key=lambda kv: int(kv[0])):
+    types = (choices or {}).get("_field_types") or {}
+    if types:
+        lines.append("Field types given by the user (the workflow does not state them): " + ", ".join(f"{f} = {t}" for f, t in types.items()) + ".")
+    for tool, c in sorted(((k, v) for k, v in (choices or {}).items() if str(k).isdigit()), key=lambda kv: int(kv[0])):
         if c.get("mode") == "any":
             lines.append(f"Tool [{tool}]: any row may be kept (the order of the incoming rows does not matter).")
         elif c.get("mode") == "order_by" and c.get("fields"):

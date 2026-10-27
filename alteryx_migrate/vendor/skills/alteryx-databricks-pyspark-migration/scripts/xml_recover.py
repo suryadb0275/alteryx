@@ -137,7 +137,8 @@ def apply(wf, path):
             continue
         if xt.macro:
             node["macro_file"] = xt.macro
-        if node["node_type"] == "ReadNode" and xt.schema and not node.get("field_info"):
+        # an input tool without a converter (BigQuery Input ...) becomes a ReadNode later (wfmodel._promote_external_sources): keep its schema too
+        if node["node_type"] in ("ReadNode", "UnsupportedNode") and xt.schema and not node.get("field_info"):
             node["field_info"] = xt.schema
             node.setdefault("_recovered", []).append("field_info")
         fn = EXTRACT.get(node["node_type"])

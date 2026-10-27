@@ -5,6 +5,7 @@ is asked here, once, and the answers go into the conversion - and, written in yo
 """
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 
 from . import pytool, sqlsrc
@@ -164,6 +165,24 @@ def gather(console: Console, analysis, handles: dict, args) -> Plan:
                     ascending = ascending and not (len(bits) > 1 and bits[1].lower().startswith("desc"))
                 plan.decisions[str(u["id"])] = {"mode": "order_by", "fields": names, "ascending": ascending} if names else {"mode": "any"}
 
+    # 4b. types of fields the workflow does not state (its inputs come from a database query). PySpark decides them at run time; Spark SQL needs them now.
+    questions = getattr(analysis, "type_questions", []) or []
+    if "sql" in plan.formats and questions:
+        users: dict = {}
+        for q in questions:
+            for f in q["fields"]:
+                users.setdefault(f, []).append(f"[{q['id']}] {q['name']}")
+        console.say(f"\nThe workflow does not say the type of {len(users)} field(s) that some tools depend on (in Alteryx '+' joins text but adds numbers;")
+        console.say("   Data Cleansing cleans text fields and puts 0 in empty numeric ones). The PySpark code checks the type at run time; Spark SQL needs it now.")
+        kinds = ["Text (string)", "Number", "Date", "Date and time", "Boolean", "I don't know (that table gets no SQL; PySpark still works)"]
+        types = {}
+        for f, used in users.items():
+            n = console.choose(f"   What type is {f}? (used by {', '.join(used[:3])})", kinds, 1)
+            if n < len(kinds):
+                types[f] = ("string", "number", "date", "datetime", "bool")[n - 1]
+        if types:
+            plan.decisions["_field_types"] = types
+
     # 5. embedded Python tools
     for tool, info in py.items():
         console.say("")
@@ -196,8 +215,8 @@ def gather(console: Console, analysis, handles: dict, args) -> Plan:
     # 7. the model
     wants_model = any(v == "port" for v in plan.port.values()) or any(not u["status"].startswith("waits") and u.get("decision") != "order" and "output tool" not in u.get("reason", "") and int(u["id"]) not in py for u in inventory)
     if wants_model:
-        if getattr(args, "model", None):
-            plan.model = args.model
+        if getattr(args, "model", None) or os.environ.get("MODEL"):
+            plan.model = getattr(args, "model", None) or os.environ["MODEL"]
         else:
             console.say("\nA Databricks model can write the code for the tools above (the rules did not convert them).")
             plan.model = console.ask("Which model? (name of a Databricks serving endpoint, e.g. alteryx.default.test; Enter = none: those tools stay as hand-offs)", "")

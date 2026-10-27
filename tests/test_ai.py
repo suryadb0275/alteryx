@@ -39,7 +39,7 @@ def test_the_responses_api_is_used_first_with_the_pasted_request_shape():
     post = Fake(responses("hello"))
     assert client(post).complete("be brief", "Hello!") == "hello"
     url, headers, body = post.seen[0]
-    assert url.endswith("/ai-gateway/mlflow/v1/responses") and body["model"] == "alteryx.default.test" and body["max_output_tokens"] == 4096
+    assert url.endswith("/ai-gateway/mlflow/v1/responses") and body["model"] == "alteryx.default.test" and body["max_output_tokens"] == 16000
     assert body["input"][-1] == {"role": "user", "content": [{"type": "input_text", "text": "Hello!"}]} and headers["Authorization"].startswith("Bearer ")
 
 

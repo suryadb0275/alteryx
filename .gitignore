@@ -7,3 +7,5 @@ output/
 .ruff_cache/
 spark-warehouse/
 metastore_db/
+
+out/
