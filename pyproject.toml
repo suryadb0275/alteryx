@@ -1,0 +1,20 @@
+[project]
+name = "alteryx-converter"
+version = "0.3.0"
+description = "Convert Alteryx workflows into Databricks notebooks (parse, slim, migration skill)"
+requires-python = ">=3.10"
+dependencies = ["lxml>=5.0", "networkx>=3.0", "sqlglot>=25.0", "databricks-sdk>=0.30"]
+
+[project.scripts]
+alteryx-migrate = "alteryx_migrate.cli:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-p no:cacheprovider"
+
+[tool.ruff]
+line-length = 200
+extend-exclude = ["alteryx_migrate/vendor", "notebooks"]
+
+[tool.ruff.lint]
+select = ["E9", "F", "B006", "B008"]

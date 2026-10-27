@@ -1,0 +1,6 @@
+# Runtime dependencies (the same list is installed on the Databricks jobs, see resources/jobs.yml).
+# pyspark is not listed: Databricks provides it, and it is only needed locally to run the tests.
+lxml>=5.0
+networkx>=3.0
+sqlglot>=25.0
+databricks-sdk>=0.30

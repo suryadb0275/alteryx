@@ -1,0 +1,66 @@
+# Two jobs, same code. Workflows are read from a Unity Catalog Volume folder; the notebooks are written to --out.
+#   databricks bundle deploy -t dev
+#   databricks bundle run convert -t dev                         # converts everything in the Volume folder now
+#   (convert_on_arrival starts by itself when a new .yxmd lands in the folder; it is paused until you unpause it)
+resources:
+  jobs:
+    convert:
+      name: alteryx-convert
+      parameters:
+        - name: input
+          default: ${var.input_path}
+        - name: out
+          default: ${var.output_path}
+      tasks:
+        - task_key: convert
+          environment_key: default
+          spark_python_task:
+            python_file: ../jobs/run_convert.py
+            parameters:
+              - "--input"
+              - "{{job.parameters.input}}"
+              - "--out"
+              - "{{job.parameters.out}}"
+              - "--catalog"
+              - ${var.catalog}
+              - "--schema"
+              - ${var.schema}
+      environments:
+        - environment_key: default
+          spec:
+            environment_version: "2"
+            dependencies:
+              - lxml>=5.0
+              - networkx>=3.0
+              - sqlglot>=25.0
+              - databricks-sdk>=0.30
+
+    convert_on_arrival:
+      name: alteryx-convert-on-arrival
+      trigger:
+        pause_status: PAUSED
+        file_arrival:
+          url: ${var.input_path}/
+      tasks:
+        - task_key: convert
+          environment_key: default
+          spark_python_task:
+            python_file: ../jobs/run_convert.py
+            parameters:
+              - "--input"
+              - ${var.input_path}
+              - "--out"
+              - ${var.output_path}
+              - "--catalog"
+              - ${var.catalog}
+              - "--schema"
+              - ${var.schema}
+      environments:
+        - environment_key: default
+          spec:
+            environment_version: "2"
+            dependencies:
+              - lxml>=5.0
+              - networkx>=3.0
+              - sqlglot>=25.0
+              - databricks-sdk>=0.30

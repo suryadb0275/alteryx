@@ -1,0 +1,11 @@
+# Runtime dependencies for parse_and_map.py.
+#
+# The a2d package itself is vendored in the a2d/ subdirectory next to this
+# file - no install step and no access to the main repo required. This
+# file lists only a2d's own third-party dependencies, scoped to the subset
+# of a2d actually vendored here (Parse -> Convert phases only: XML parsing,
+# the converter registry, the IR graph/nodes, the expression engine - not
+# the code generators). Confirmed by scanning every vendored module's
+# top-level third-party imports: only these two.
+lxml>=5.0
+networkx>=3.0

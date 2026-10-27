@@ -1,0 +1,7 @@
+{
+  "_comment": "Human-supplied configuration merged over IR nodes (key = tool id). Tools listed here stay requires_review. Non-numeric keys such as this one are ignored.",
+  "88":   {"join_keys": [{"left_field": "Region", "right_field": "KommuneNr"}]},
+  "692":  {"output_field": "Endring_pst", "order_by": [{"field_name": "Region", "ascending": true}, {"field_name": "Omsetningsår", "ascending": true}]},
+  "806":  {"custom_python": "{out} = cleanse_dataframe({in0})"},
+  "1601": {"header_field": "Hyttetype", "value_field": "Antall"}
+}

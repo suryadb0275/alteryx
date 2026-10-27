@@ -1,0 +1,177 @@
+<?xml version="1.0"?>
+<AlteryxDocument yxmdVer="2021.3">
+  <Nodes>
+    <Node ToolID="25">
+      <GuiSettings Plugin="big_query_input_v3.0.0">
+        <Position x="107" y="618" />
+      </GuiSettings>
+      <Properties>
+        <Configuration>
+          <authType>ServicePrincipal</authType>
+          <driveCheckbox>False</driveCheckbox>
+          <storageCheckbox>False</storageCheckbox>
+          <bigtableCheckbox>False</bigtableCheckbox>
+          <selectedId>
+          </selectedId>
+          <inputRecordLimit>1</inputRecordLimit>
+          <shouldLimitRecords>False</shouldLimitRecords>
+          <usingCustomFilter>True</usingCustomFilter>
+          <inputCustomFilter>select * from sap_data.Sales_V</inputCustomFilter>
+          <customFilterProjectId>demo-project</customFilterProjectId>
+          <sqlType>STANDARD_SQL</sqlType>
+          <maxFieldLength>255</maxFieldLength>
+        </Configuration>
+        <Annotation DisplayMode="0">
+          <Name />
+          <DefaultAnnotationText />
+          <Left value="False" />
+        </Annotation>
+        <MetaInfo connection="Output">
+          <RecordInfo>
+            <Field name="Region" source="BigQuery" type="V_WString" size="255" />
+            <Field name="Amount" source="BigQuery" type="Double" />
+          </RecordInfo>
+        </MetaInfo>
+      </Properties>
+      <EngineSettings Macro="BigQuery\big_query_input.yxmc" EngineDll="Macro" EngineDllEntryPoint="BigQuery\big_query_input.yxmc" />
+    </Node>
+    <Node ToolID="17">
+      <GuiSettings Plugin="JupyterCode">
+        <Position x="215" y="594" />
+      </GuiSettings>
+      <Properties>
+        <Configuration>
+          <WorkflowName>c:\program files\alteryx\bin\[unnamed module]</WorkflowName>
+          <JupyterProduction>true</JupyterProduction>
+          <vEnvName>designerbasetools_venv</vEnvName>
+          <DefaultVenv>1</DefaultVenv>
+          <productionModeScript>#################################
+from ayx import Alteryx
+import pandas as pd
+
+
+#################################
+df = Alteryx.read("#1")
+
+
+#################################
+df['Amount2'] = df['Amount'] * 2
+
+
+#################################
+df_big = df[df['Amount'] > 10]
+
+
+#################################
+Alteryx.write(df, 1)
+
+
+#################################
+Alteryx.write(df_big, 2)
+</productionModeScript>
+          <Port>49819</Port>
+        </Configuration>
+        <Annotation DisplayMode="0">
+          <Name />
+          <DefaultAnnotationText />
+          <Left value="False" />
+        </Annotation>
+        <MetaInfo connection="Output1">
+          <RecordInfo>
+            <Field name="Region" size="1073741823" source="PythonTool:" type="V_WString" />
+            <Field name="Amount" source="PythonTool:" type="Double" />
+            <Field name="Amount2" source="PythonTool:" type="Double" />
+          </RecordInfo>
+        </MetaInfo>
+      </Properties>
+      <EngineSettings EngineDll="Jupyter" EngineDllEntryPoint="Jupyter" />
+    </Node>
+    <Node ToolID="42">
+      <GuiSettings Plugin="AlteryxBasePluginsGui.AlteryxSelect.AlteryxSelect">
+        <Position x="299" y="594" />
+      </GuiSettings>
+      <Properties>
+        <Configuration>
+          <OrderChanged value="False" />
+          <CommaDecimal value="False" />
+          <SelectFields>
+            <SelectField field="Region" selected="True" />
+            <SelectField field="Amount2" selected="True" />
+            <SelectField field="*Unknown" selected="False" />
+          </SelectFields>
+        </Configuration>
+        <Annotation DisplayMode="0">
+          <Name />
+          <DefaultAnnotationText />
+          <Left value="False" />
+        </Annotation>
+      </Properties>
+      <EngineSettings EngineDll="AlteryxBasePluginsEngine.dll" EngineDllEntryPoint="AlteryxSelect" />
+    </Node>
+    <Node ToolID="43">
+      <GuiSettings Plugin="AlteryxBasePluginsGui.Filter.Filter">
+        <Position x="299" y="700" />
+      </GuiSettings>
+      <Properties>
+        <Configuration>
+          <Expression>[Amount] &gt; 20</Expression>
+          <Mode>Custom</Mode>
+        </Configuration>
+        <Annotation DisplayMode="0">
+          <Name />
+          <DefaultAnnotationText />
+          <Left value="False" />
+        </Annotation>
+      </Properties>
+      <EngineSettings EngineDll="AlteryxBasePluginsEngine.dll" EngineDllEntryPoint="AlteryxFilter" />
+    </Node>
+  </Nodes>
+  <Connections>
+    <Connection>
+      <Origin ToolID="25" Connection="Output" />
+      <Destination ToolID="17" Connection="Input" />
+    </Connection>
+    <Connection>
+      <Origin ToolID="17" Connection="Output1" />
+      <Destination ToolID="42" Connection="Input" />
+    </Connection>
+    <Connection>
+      <Origin ToolID="17" Connection="Output2" />
+      <Destination ToolID="43" Connection="Input" />
+    </Connection>
+  </Connections>
+  <Properties>
+    <Memory default="True" />
+    <GlobalRecordLimit value="0" />
+    <TempFiles default="True" />
+    <Annotation on="True" includeToolName="False" />
+    <ConvertDateTime default="True" />
+    <ErrorWarningInResults default="True" />
+    <ShowAllMacroMessages value="False" />
+    <ShowConnectionStatusIsOn value="True" />
+    <ShowConnectionStatusOnlyWhenRunning value="True" />
+    <ZoomLevel value="0" />
+    <LayoutType>Horizontal</LayoutType>
+    <MetaInfo>
+      <NameIsFileName value="True" />
+      <Name>python_flow</Name>
+      <Description />
+      <RootToolName />
+      <ToolVersion />
+      <ToolInDb value="False" />
+      <CategoryName />
+      <SearchTags />
+      <Author />
+      <Company />
+      <Copyright />
+      <DescriptionLink actual="" displayed="" />
+      <Example>
+        <Description />
+        <File />
+      </Example>
+    </MetaInfo>
+    <Events>
+      <Enabled value="True" />
+    </Events>
+  </Properties>
+</AlteryxDocument>

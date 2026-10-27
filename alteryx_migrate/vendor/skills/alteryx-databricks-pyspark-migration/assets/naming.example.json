@@ -1,0 +1,5 @@
+{
+  "_comment": "tool id of the node whose output is materialised -> table name (no catalog/schema). Bronze keys use the Input tool id.",
+  "2419": "gold_omsetningstabell_helarsboliger",
+  "1": "bronze_matrikkel_omsetning_verdiobjekt"
+}

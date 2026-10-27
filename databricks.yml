@@ -1,0 +1,44 @@
+# alteryx-converter - one Databricks Asset Bundle: the converter notebook plus two jobs that convert Alteryx workflows
+# from a Unity Catalog Volume folder into notebooks.
+#
+#   databricks auth login --host https://<workspace>
+#   databricks bundle validate -t dev --var input_path=... --var output_path=...
+#   databricks bundle deploy   -t dev --var input_path=/Volumes/<c>/<s>/<v>/alteryx --var output_path=/Volumes/<c>/<s>/<v>/notebooks
+#   databricks bundle run convert -t dev --var input_path=... --var output_path=...
+#
+# catalog / schema are optional (see the README). Put the values in a target (below) instead of repeating --var.
+bundle:
+  name: alteryx-converter
+
+include:
+  - resources/*.yml
+
+sync:
+  include:
+    - alteryx_migrate/**
+    - jobs/**
+    - notebooks/**
+  exclude:
+    - "**/__pycache__/**"
+    - "**/*.pyc"
+
+variables:
+  input_path:
+    description: Volume folder that holds the .yxmd / .yxzp files, e.g. /Volumes/main/migration/files/alteryx
+  output_path:
+    description: Folder for the generated notebooks (a Volume folder or a workspace folder)
+  catalog:
+    description: Catalog of the tables the notebooks read and write (empty = not qualified)
+    default: ""
+  schema:
+    description: Schema of those tables (empty = not qualified)
+    default: ""
+
+targets:
+  dev:
+    mode: development
+    default: true
+  prod:
+    mode: production
+    workspace:
+      root_path: /Workspace/Shared/.bundle/${bundle.name}/${bundle.target}

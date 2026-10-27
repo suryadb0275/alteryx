@@ -1,0 +1,982 @@
+{
+ "workflow": {
+  "file_path": "mini_orders_demo.yxmd",
+  "alteryx_version": "2024.2",
+  "tool_count": 24,
+  "connection_count": 21
+ },
+ "tool_mapping": [
+  {
+   "tool_id": 1,
+   "tool_type": "Input",
+   "plugin_name": "plugin.Input",
+   "category": "x",
+   "status": "mapped",
+   "ir_node_type": "ReadNode",
+   "converter_class": "X",
+   "reason": null
+  },
+  {
+   "tool_id": 2,
+   "tool_type": "Input",
+   "plugin_name": "plugin.Input",
+   "category": "x",
+   "status": "mapped",
+   "ir_node_type": "ReadNode",
+   "converter_class": "X",
+   "reason": null
+  },
+  {
+   "tool_id": 3,
+   "tool_type": "Filter",
+   "plugin_name": "plugin.Filter",
+   "category": "x",
+   "status": "mapped",
+   "ir_node_type": "FilterNode",
+   "converter_class": "X",
+   "reason": null
+  },
+  {
+   "tool_id": 4,
+   "tool_type": "Formula",
+   "plugin_name": "plugin.Formula",
+   "category": "x",
+   "status": "mapped",
+   "ir_node_type": "FormulaNode",
+   "converter_class": "X",
+   "reason": null
+  },
+  {
+   "tool_id": 5,
+   "tool_type": "Join",
+   "plugin_name": "plugin.Join",
+   "category": "x",
+   "status": "mapped",
+   "ir_node_type": "JoinNode",
+   "converter_class": "X",
+   "reason": null
+  },
+  {
+   "tool_id": 6,
+   "tool_type": "Select",
+   "plugin_name": "plugin.Select",
+   "category": "x",
+   "status": "mapped",
+   "ir_node_type": "SelectNode",
+   "converter_class": "X",
+   "reason": null
+  },
+  {
+   "tool_id": 7,
+   "tool_type": "Summarize",
+   "plugin_name": "plugin.Summarize",
+   "category": "x",
+   "status": "mapped",
+   "ir_node_type": "SummarizeNode",
+   "converter_class": "X",
+   "reason": null
+  },
+  {
+   "tool_id": 8,
+   "tool_type": "Sort",
+   "plugin_name": "plugin.Sort",
+   "category": "x",
+   "status": "mapped",
+   "ir_node_type": "SortNode",
+   "converter_class": "X",
+   "reason": null
+  },
+  {
+   "tool_id": 9,
+   "tool_type": "Output",
+   "plugin_name": "plugin.Output",
+   "category": "x",
+   "status": "mapped",
+   "ir_node_type": "WriteNode",
+   "converter_class": "X",
+   "reason": null
+  },
+  {
+   "tool_id": 10,
+   "tool_type": "Output",
+   "plugin_name": "plugin.Output",
+   "category": "x",
+   "status": "mapped",
+   "ir_node_type": "WriteNode",
+   "converter_class": "X",
+   "reason": null
+  },
+  {
+   "tool_id": 11,
+   "tool_type": "Sort",
+   "plugin_name": "plugin.Sort",
+   "category": "x",
+   "status": "mapped",
+   "ir_node_type": "SortNode",
+   "converter_class": "X",
+   "reason": null
+  },
+  {
+   "tool_id": 12,
+   "tool_type": "Unique",
+   "plugin_name": "plugin.Unique",
+   "category": "x",
+   "status": "mapped",
+   "ir_node_type": "UniqueNode",
+   "converter_class": "X",
+   "reason": null
+  },
+  {
+   "tool_id": 13,
+   "tool_type": "TextToColumns",
+   "plugin_name": "plugin.TextToColumns",
+   "category": "x",
+   "status": "mapped",
+   "ir_node_type": "TextToColumnsNode",
+   "converter_class": "X",
+   "reason": null
+  },
+  {
+   "tool_id": 14,
+   "tool_type": "RecordID",
+   "plugin_name": "plugin.RecordID",
+   "category": "x",
+   "status": "mapped",
+   "ir_node_type": "RecordIDNode",
+   "converter_class": "X",
+   "reason": null
+  },
+  {
+   "tool_id": 15,
+   "tool_type": "Output",
+   "plugin_name": "plugin.Output",
+   "category": "x",
+   "status": "mapped",
+   "ir_node_type": "WriteNode",
+   "converter_class": "X",
+   "reason": null
+  },
+  {
+   "tool_id": 16,
+   "tool_type": "TextInput",
+   "plugin_name": "plugin.TextInput",
+   "category": "x",
+   "status": "mapped",
+   "ir_node_type": "LiteralDataNode",
+   "converter_class": "X",
+   "reason": null
+  },
+  {
+   "tool_id": 17,
+   "tool_type": "Union",
+   "plugin_name": "plugin.Union",
+   "category": "x",
+   "status": "mapped",
+   "ir_node_type": "UnionNode",
+   "converter_class": "X",
+   "reason": null
+  },
+  {
+   "tool_id": 18,
+   "tool_type": "Output",
+   "plugin_name": "plugin.Output",
+   "category": "x",
+   "status": "mapped",
+   "ir_node_type": "WriteNode",
+   "converter_class": "X",
+   "reason": null
+  },
+  {
+   "tool_id": 19,
+   "tool_type": "Sort",
+   "plugin_name": "plugin.Sort",
+   "category": "x",
+   "status": "mapped",
+   "ir_node_type": "SortNode",
+   "converter_class": "X",
+   "reason": null
+  },
+  {
+   "tool_id": 20,
+   "tool_type": "MultiRowFormula",
+   "plugin_name": "plugin.MultiRowFormula",
+   "category": "x",
+   "status": "mapped",
+   "ir_node_type": "MultiRowFormulaNode",
+   "converter_class": "X",
+   "reason": null
+  },
+  {
+   "tool_id": 21,
+   "tool_type": "Output",
+   "plugin_name": "plugin.Output",
+   "category": "x",
+   "status": "mapped",
+   "ir_node_type": "WriteNode",
+   "converter_class": "X",
+   "reason": null
+  },
+  {
+   "tool_id": 22,
+   "tool_type": "Browse",
+   "plugin_name": "plugin.Browse",
+   "category": "x",
+   "status": "mapped",
+   "ir_node_type": "BrowseNode",
+   "converter_class": "X",
+   "reason": null
+  },
+  {
+   "tool_id": 23,
+   "tool_type": "TextBox",
+   "plugin_name": "plugin.TextBox",
+   "category": "x",
+   "status": "mapped",
+   "ir_node_type": "CommentNode",
+   "converter_class": "X",
+   "reason": null
+  },
+  {
+   "tool_id": 24,
+   "tool_type": "ToolContainer",
+   "plugin_name": "c",
+   "category": "x",
+   "status": "skipped",
+   "ir_node_type": null,
+   "converter_class": null,
+   "reason": "Visual-only node (no data transformation)"
+  }
+ ],
+ "ir": {
+  "nodes": [
+   {
+    "node_type": "ReadNode",
+    "node_id": 1,
+    "original_tool_type": "Input",
+    "original_plugin_name": "plugin.Input",
+    "annotation": null,
+    "position": [
+     10.0,
+     100.0
+    ],
+    "conversion_confidence": 1.0,
+    "conversion_notes": [],
+    "conversion_method": "deterministic",
+    "source_type": "database",
+    "file_path": "",
+    "connection_string": "demo:src",
+    "table_name": "",
+    "query": "select OrderId, CustId, Amount, Status, OrderDate, Tags from dbo.orders",
+    "has_header": true,
+    "delimiter": ",",
+    "encoding": "utf-8",
+    "file_format": ""
+   },
+   {
+    "node_type": "ReadNode",
+    "node_id": 2,
+    "original_tool_type": "Input",
+    "original_plugin_name": "plugin.Input",
+    "annotation": null,
+    "position": [
+     20.0,
+     100.0
+    ],
+    "conversion_confidence": 1.0,
+    "conversion_notes": [],
+    "conversion_method": "deterministic",
+    "source_type": "database",
+    "file_path": "",
+    "connection_string": "demo:src",
+    "table_name": "",
+    "query": "select CustId, Name, Country from dbo.customers",
+    "has_header": true,
+    "delimiter": ",",
+    "encoding": "utf-8",
+    "file_format": ""
+   },
+   {
+    "node_type": "FilterNode",
+    "node_id": 3,
+    "original_tool_type": "Filter",
+    "original_plugin_name": "plugin.Filter",
+    "annotation": null,
+    "position": [
+     30.0,
+     100.0
+    ],
+    "conversion_confidence": 1.0,
+    "conversion_notes": [],
+    "conversion_method": "deterministic",
+    "expression": "[Status] == 'OK' && [Amount] > 0",
+    "mode": "custom"
+   },
+   {
+    "node_type": "FormulaNode",
+    "node_id": 4,
+    "original_tool_type": "Formula",
+    "original_plugin_name": "plugin.Formula",
+    "annotation": null,
+    "position": [
+     40.0,
+     100.0
+    ],
+    "conversion_confidence": 1.0,
+    "conversion_notes": [],
+    "conversion_method": "deterministic",
+    "formulas": [
+     {
+      "output_field": "Year",
+      "expression": "Left([OrderDate],4)",
+      "data_type": "V_WString",
+      "size": 100
+     },
+     {
+      "output_field": "Label",
+      "expression": "[Status]+'-'+ToString([Amount])",
+      "data_type": "V_WString",
+      "size": 100
+     },
+     {
+      "output_field": "Big",
+      "expression": "IF [Amount]>=100 THEN 'Y' ELSE 'N' ENDIF",
+      "data_type": "V_WString",
+      "size": 1
+     }
+    ]
+   },
+   {
+    "node_type": "JoinNode",
+    "node_id": 5,
+    "original_tool_type": "Join",
+    "original_plugin_name": "plugin.Join",
+    "annotation": null,
+    "position": [
+     50.0,
+     100.0
+    ],
+    "conversion_confidence": 1.0,
+    "conversion_notes": [],
+    "conversion_method": "deterministic",
+    "join_type": "inner",
+    "join_keys": [
+     {
+      "left_field": "CustId",
+      "right_field": "CustId"
+     }
+    ],
+    "select_left": [],
+    "select_right": [
+     {
+      "field_name": "CustId",
+      "action": "deselect",
+      "selected": false,
+      "rename_to": null,
+      "new_type": null,
+      "new_size": null
+     },
+     {
+      "field_name": "Name",
+      "action": "select",
+      "selected": true,
+      "rename_to": null,
+      "new_type": null,
+      "new_size": null
+     },
+     {
+      "field_name": "Country",
+      "action": "select",
+      "selected": true,
+      "rename_to": null,
+      "new_type": null,
+      "new_size": null
+     }
+    ]
+   },
+   {
+    "node_type": "SelectNode",
+    "node_id": 6,
+    "original_tool_type": "Select",
+    "original_plugin_name": "plugin.Select",
+    "annotation": null,
+    "position": [
+     60.0,
+     100.0
+    ],
+    "conversion_confidence": 1.0,
+    "conversion_notes": [],
+    "conversion_method": "deterministic",
+    "select_all_unknown": true,
+    "field_operations": [
+     {
+      "field_name": "Tags",
+      "action": "deselect",
+      "selected": false,
+      "rename_to": null,
+      "new_type": null,
+      "new_size": null,
+      "description": null
+     },
+     {
+      "field_name": "Name",
+      "action": "rename",
+      "selected": true,
+      "rename_to": "CustomerName",
+      "new_type": null,
+      "new_size": null,
+      "description": null
+     }
+    ]
+   },
+   {
+    "node_type": "SummarizeNode",
+    "node_id": 7,
+    "original_tool_type": "Summarize",
+    "original_plugin_name": "plugin.Summarize",
+    "annotation": null,
+    "position": [
+     70.0,
+     100.0
+    ],
+    "conversion_confidence": 1.0,
+    "conversion_notes": [],
+    "conversion_method": "deterministic",
+    "aggregations": [
+     {
+      "field_name": "Country",
+      "action": "GroupBy",
+      "output_field_name": "Country",
+      "separator": ",",
+      "percentile_value": null
+     },
+     {
+      "field_name": "Year",
+      "action": "GroupBy",
+      "output_field_name": "Year",
+      "separator": ",",
+      "percentile_value": null
+     },
+     {
+      "field_name": "Amount",
+      "action": "Sum",
+      "output_field_name": "Total",
+      "separator": ",",
+      "percentile_value": null
+     },
+     {
+      "field_name": "Amount",
+      "action": "Count",
+      "output_field_name": "Orders",
+      "separator": ",",
+      "percentile_value": null
+     },
+     {
+      "field_name": "Amount",
+      "action": "Avg",
+      "output_field_name": "AvgAmt",
+      "separator": ",",
+      "percentile_value": null
+     }
+    ]
+   },
+   {
+    "node_type": "SortNode",
+    "node_id": 8,
+    "original_tool_type": "Sort",
+    "original_plugin_name": "plugin.Sort",
+    "annotation": null,
+    "position": [
+     80.0,
+     100.0
+    ],
+    "conversion_confidence": 1.0,
+    "conversion_notes": [],
+    "conversion_method": "deterministic",
+    "sort_fields": [
+     {
+      "field_name": "Country",
+      "ascending": true,
+      "nulls_first": null
+     },
+     {
+      "field_name": "Year",
+      "ascending": false,
+      "nulls_first": null
+     }
+    ]
+   },
+   {
+    "node_type": "WriteNode",
+    "node_id": 9,
+    "original_tool_type": "Output",
+    "original_plugin_name": "plugin.Output",
+    "annotation": null,
+    "position": [
+     90.0,
+     100.0
+    ],
+    "conversion_confidence": 1.0,
+    "conversion_notes": [],
+    "conversion_method": "deterministic",
+    "destination_type": "file",
+    "file_path": "out/report.csv",
+    "file_format": "csv",
+    "write_mode": "overwrite",
+    "has_header": true,
+    "delimiter": ",",
+    "encoding": "utf-8",
+    "connection_string": "",
+    "table_name": "",
+    "field_info": [],
+    "partition_fields": []
+   },
+   {
+    "node_type": "WriteNode",
+    "node_id": 10,
+    "original_tool_type": "Output",
+    "original_plugin_name": "plugin.Output",
+    "annotation": null,
+    "position": [
+     100.0,
+     100.0
+    ],
+    "conversion_confidence": 1.0,
+    "conversion_notes": [],
+    "conversion_method": "deterministic",
+    "destination_type": "file",
+    "file_path": "out/rejected_orders.csv",
+    "file_format": "csv",
+    "write_mode": "overwrite",
+    "has_header": true,
+    "delimiter": ",",
+    "encoding": "utf-8",
+    "connection_string": "",
+    "table_name": "",
+    "field_info": [],
+    "partition_fields": []
+   },
+   {
+    "node_type": "SortNode",
+    "node_id": 11,
+    "original_tool_type": "Sort",
+    "original_plugin_name": "plugin.Sort",
+    "annotation": null,
+    "position": [
+     110.0,
+     100.0
+    ],
+    "conversion_confidence": 1.0,
+    "conversion_notes": [],
+    "conversion_method": "deterministic",
+    "sort_fields": [
+     {
+      "field_name": "OrderDate",
+      "ascending": true,
+      "nulls_first": null
+     }
+    ]
+   },
+   {
+    "node_type": "UniqueNode",
+    "node_id": 12,
+    "original_tool_type": "Unique",
+    "original_plugin_name": "plugin.Unique",
+    "annotation": null,
+    "position": [
+     120.0,
+     100.0
+    ],
+    "conversion_confidence": 1.0,
+    "conversion_notes": [],
+    "conversion_method": "deterministic",
+    "key_fields": [
+     "CustId"
+    ]
+   },
+   {
+    "node_type": "TextToColumnsNode",
+    "node_id": 13,
+    "original_tool_type": "TextToColumns",
+    "original_plugin_name": "plugin.TextToColumns",
+    "annotation": null,
+    "position": [
+     130.0,
+     100.0
+    ],
+    "conversion_confidence": 1.0,
+    "conversion_notes": [],
+    "conversion_method": "deterministic",
+    "field_name": "Tags",
+    "delimiter": ",",
+    "split_to": "columns",
+    "num_columns": 2,
+    "output_root_name": "Tags",
+    "skip_empty": false
+   },
+   {
+    "node_type": "RecordIDNode",
+    "node_id": 14,
+    "original_tool_type": "RecordID",
+    "original_plugin_name": "plugin.RecordID",
+    "annotation": null,
+    "position": [
+     140.0,
+     100.0
+    ],
+    "conversion_confidence": 1.0,
+    "conversion_notes": [],
+    "conversion_method": "deterministic",
+    "output_field": "RID",
+    "starting_value": 1,
+    "output_type": "Int32"
+   },
+   {
+    "node_type": "WriteNode",
+    "node_id": 15,
+    "original_tool_type": "Output",
+    "original_plugin_name": "plugin.Output",
+    "annotation": null,
+    "position": [
+     150.0,
+     100.0
+    ],
+    "conversion_confidence": 1.0,
+    "conversion_notes": [],
+    "conversion_method": "deterministic",
+    "destination_type": "file",
+    "file_path": "out/first_orders.csv",
+    "file_format": "csv",
+    "write_mode": "overwrite",
+    "has_header": true,
+    "delimiter": ",",
+    "encoding": "utf-8",
+    "connection_string": "",
+    "table_name": "",
+    "field_info": [],
+    "partition_fields": []
+   },
+   {
+    "node_type": "LiteralDataNode",
+    "node_id": 16,
+    "original_tool_type": "TextInput",
+    "original_plugin_name": "plugin.TextInput",
+    "annotation": null,
+    "position": [
+     160.0,
+     100.0
+    ],
+    "conversion_confidence": 1.0,
+    "conversion_notes": [],
+    "conversion_method": "deterministic",
+    "num_fields": 3,
+    "num_records": 1,
+    "field_names": [
+     "CustId",
+     "Name",
+     "Extra"
+    ],
+    "field_types": [
+     "Int32",
+     "V_WString",
+     "V_WString"
+    ],
+    "data_rows": [
+     [
+      "99",
+      "Zed",
+      "lit"
+     ]
+    ]
+   },
+   {
+    "node_type": "UnionNode",
+    "node_id": 17,
+    "original_tool_type": "Union",
+    "original_plugin_name": "plugin.Union",
+    "annotation": null,
+    "position": [
+     170.0,
+     100.0
+    ],
+    "conversion_confidence": 1.0,
+    "conversion_notes": [],
+    "conversion_method": "deterministic",
+    "mode": "auto",
+    "allow_missing": true
+   },
+   {
+    "node_type": "WriteNode",
+    "node_id": 18,
+    "original_tool_type": "Output",
+    "original_plugin_name": "plugin.Output",
+    "annotation": null,
+    "position": [
+     180.0,
+     100.0
+    ],
+    "conversion_confidence": 1.0,
+    "conversion_notes": [],
+    "conversion_method": "deterministic",
+    "destination_type": "file",
+    "file_path": "out/all_customers.csv",
+    "file_format": "csv",
+    "write_mode": "overwrite",
+    "has_header": true,
+    "delimiter": ",",
+    "encoding": "utf-8",
+    "connection_string": "",
+    "table_name": "",
+    "field_info": [],
+    "partition_fields": []
+   },
+   {
+    "node_type": "SortNode",
+    "node_id": 19,
+    "original_tool_type": "Sort",
+    "original_plugin_name": "plugin.Sort",
+    "annotation": null,
+    "position": [
+     190.0,
+     100.0
+    ],
+    "conversion_confidence": 1.0,
+    "conversion_notes": [],
+    "conversion_method": "deterministic",
+    "sort_fields": [
+     {
+      "field_name": "OrderDate",
+      "ascending": true,
+      "nulls_first": null
+     }
+    ]
+   },
+   {
+    "node_type": "MultiRowFormulaNode",
+    "node_id": 20,
+    "original_tool_type": "MultiRowFormula",
+    "original_plugin_name": "plugin.MultiRowFormula",
+    "annotation": null,
+    "position": [
+     200.0,
+     100.0
+    ],
+    "conversion_confidence": 1.0,
+    "conversion_notes": [],
+    "conversion_method": "deterministic",
+    "expression": "[Amount]-[Row-1:Amount]",
+    "output_field": "Delta",
+    "rows_above": 1,
+    "rows_below": 0,
+    "group_fields": [],
+    "output_type": "",
+    "output_size": null
+   },
+   {
+    "node_type": "WriteNode",
+    "node_id": 21,
+    "original_tool_type": "Output",
+    "original_plugin_name": "plugin.Output",
+    "annotation": null,
+    "position": [
+     210.0,
+     100.0
+    ],
+    "conversion_confidence": 1.0,
+    "conversion_notes": [],
+    "conversion_method": "deterministic",
+    "destination_type": "file",
+    "file_path": "out/deltas.csv",
+    "file_format": "csv",
+    "write_mode": "overwrite",
+    "has_header": true,
+    "delimiter": ",",
+    "encoding": "utf-8",
+    "connection_string": "",
+    "table_name": "",
+    "field_info": [],
+    "partition_fields": []
+   },
+   {
+    "node_type": "BrowseNode",
+    "node_id": 22,
+    "original_tool_type": "Browse",
+    "original_plugin_name": "plugin.Browse",
+    "annotation": null,
+    "position": [
+     220.0,
+     100.0
+    ],
+    "conversion_confidence": 1.0,
+    "conversion_notes": [],
+    "conversion_method": "deterministic"
+   },
+   {
+    "node_type": "CommentNode",
+    "node_id": 23,
+    "original_tool_type": "TextBox",
+    "original_plugin_name": "plugin.TextBox",
+    "annotation": null,
+    "position": [
+     230.0,
+     100.0
+    ],
+    "conversion_confidence": 1.0,
+    "conversion_notes": [],
+    "conversion_method": "deterministic",
+    "comment_text": "Demo workflow: valid orders joined to customers, summarised per country/year.",
+    "font_size": 12,
+    "background_color": ""
+   }
+  ],
+  "edges": [
+   {
+    "source": 1,
+    "target": 3,
+    "origin_anchor": "Output",
+    "destination_anchor": "Input",
+    "is_wireless": false
+   },
+   {
+    "source": 3,
+    "target": 4,
+    "origin_anchor": "True",
+    "destination_anchor": "Input",
+    "is_wireless": false
+   },
+   {
+    "source": 4,
+    "target": 5,
+    "origin_anchor": "Output",
+    "destination_anchor": "Left",
+    "is_wireless": false
+   },
+   {
+    "source": 2,
+    "target": 5,
+    "origin_anchor": "Output",
+    "destination_anchor": "Right",
+    "is_wireless": false
+   },
+   {
+    "source": 5,
+    "target": 6,
+    "origin_anchor": "Join",
+    "destination_anchor": "Input",
+    "is_wireless": false
+   },
+   {
+    "source": 6,
+    "target": 7,
+    "origin_anchor": "Output",
+    "destination_anchor": "Input",
+    "is_wireless": false
+   },
+   {
+    "source": 7,
+    "target": 8,
+    "origin_anchor": "Output",
+    "destination_anchor": "Input",
+    "is_wireless": false
+   },
+   {
+    "source": 8,
+    "target": 9,
+    "origin_anchor": "Output",
+    "destination_anchor": "Input",
+    "is_wireless": false
+   },
+   {
+    "source": 5,
+    "target": 10,
+    "origin_anchor": "Left",
+    "destination_anchor": "Input",
+    "is_wireless": false
+   },
+   {
+    "source": 1,
+    "target": 11,
+    "origin_anchor": "Output",
+    "destination_anchor": "Input",
+    "is_wireless": false
+   },
+   {
+    "source": 11,
+    "target": 12,
+    "origin_anchor": "Output",
+    "destination_anchor": "Input",
+    "is_wireless": false
+   },
+   {
+    "source": 12,
+    "target": 13,
+    "origin_anchor": "Unique",
+    "destination_anchor": "Input",
+    "is_wireless": false
+   },
+   {
+    "source": 13,
+    "target": 14,
+    "origin_anchor": "Output",
+    "destination_anchor": "Input",
+    "is_wireless": false
+   },
+   {
+    "source": 14,
+    "target": 15,
+    "origin_anchor": "Output",
+    "destination_anchor": "Input",
+    "is_wireless": false
+   },
+   {
+    "source": 2,
+    "target": 17,
+    "origin_anchor": "Output",
+    "destination_anchor": "Input",
+    "is_wireless": false
+   },
+   {
+    "source": 16,
+    "target": 17,
+    "origin_anchor": "Output",
+    "destination_anchor": "Input",
+    "is_wireless": false
+   },
+   {
+    "source": 17,
+    "target": 18,
+    "origin_anchor": "Output",
+    "destination_anchor": "Input",
+    "is_wireless": false
+   },
+   {
+    "source": 1,
+    "target": 19,
+    "origin_anchor": "Output",
+    "destination_anchor": "Input",
+    "is_wireless": false
+   },
+   {
+    "source": 19,
+    "target": 20,
+    "origin_anchor": "Output",
+    "destination_anchor": "Input",
+    "is_wireless": false
+   },
+   {
+    "source": 20,
+    "target": 21,
+    "origin_anchor": "Output",
+    "destination_anchor": "Input",
+    "is_wireless": false
+   },
+   {
+    "source": 7,
+    "target": 22,
+    "origin_anchor": "Output",
+    "destination_anchor": "Input",
+    "is_wireless": false
+   }
+  ]
+ },
+ "expressions": []
+}

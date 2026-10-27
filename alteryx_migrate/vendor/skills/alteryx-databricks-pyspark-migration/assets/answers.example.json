@@ -1,0 +1,15 @@
+{
+  "_comment": "Copy to answers.json and edit. Delete what you cannot answer yet - those tools stay 'waiting for input'. {} converts whatever is not blocked.",
+  "overrides": {
+    "19": {"order_by": [{"field_name": "OmsetningTinglystDato", "ascending": true}]}
+  },
+  "macros": {
+    "Cleanse.yxmc": {"custom_python": "{out} = my_cleanse({in0})"}
+  },
+  "helpers": ["my_cleanse"],
+  "accept": {"order_any": [53, 131], "source_schema_at_runtime": true, "defaults": true},
+  "project": {"timezone": "Europe/Oslo", "catalog": "main", "bronze_schema": "bronze", "silver_schema": "silver", "gold_schema": "gold",
+              "write_mode": "overwrite", "allow_overwrite": false, "spark_runtime": "DBR 16.x", "ansi": false,
+              "text_match_case_sensitive": false},
+  "validation": {"input_snapshot": "main.bronze_snapshot.*", "alteryx_output": "main.baseline.omsetningstabell"}
+}

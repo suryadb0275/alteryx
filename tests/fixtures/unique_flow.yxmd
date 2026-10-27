@@ -1,0 +1,105 @@
+<?xml version="1.0"?>
+<AlteryxDocument yxmdVer="2021.3">
+  <Nodes>
+    <Node ToolID="25">
+      <GuiSettings Plugin="big_query_input_v3.0.0">
+        <Position x="107" y="618" />
+      </GuiSettings>
+      <Properties>
+        <Configuration>
+          <authType>ServicePrincipal</authType>
+          <driveCheckbox>False</driveCheckbox>
+          <storageCheckbox>False</storageCheckbox>
+          <bigtableCheckbox>False</bigtableCheckbox>
+          <selectedId>
+          </selectedId>
+          <inputRecordLimit>1</inputRecordLimit>
+          <shouldLimitRecords>False</shouldLimitRecords>
+          <usingCustomFilter>True</usingCustomFilter>
+          <inputCustomFilter>select * from sap_data.Customer_Master_V</inputCustomFilter>
+          <customFilterProjectId>demo-project</customFilterProjectId>
+          <sqlType>STANDARD_SQL</sqlType>
+          <maxFieldLength>255</maxFieldLength>
+        </Configuration>
+        <Annotation DisplayMode="0">
+          <Name />
+          <DefaultAnnotationText />
+          <Left value="False" />
+        </Annotation>
+        <MetaInfo connection="Output">
+          <RecordInfo>
+            <Field name="Customer_Name" source="BigQuery" type="V_WString" size="255" />
+            <Field name="Region" source="BigQuery" type="V_WString" size="255" />
+            <Field name="Business" source="BigQuery" type="V_WString" size="255" />
+            <Field name="Updated_On" source="BigQuery" type="V_WString" size="255" />
+          </RecordInfo>
+        </MetaInfo>
+      </Properties>
+      <EngineSettings Macro="BigQuery\big_query_input.yxmc" EngineDll="Macro" EngineDllEntryPoint="BigQuery\big_query_input.yxmc" />
+    </Node>
+    <Node ToolID="20">
+      <GuiSettings Plugin="AlteryxBasePluginsGui.Unique.Unique">
+        <Position x="215" y="594" />
+      </GuiSettings>
+      <Properties>
+        <Configuration>
+          <UniqueFields>
+            <Field field="Customer_Name" />
+            <Field field="Region" />
+            <Field field="Business" />
+          </UniqueFields>
+        </Configuration>
+        <Annotation DisplayMode="0">
+          <Name />
+          <DefaultAnnotationText />
+          <Left value="False" />
+        </Annotation>
+      </Properties>
+      <EngineSettings EngineDll="AlteryxBasePluginsEngine.dll" EngineDllEntryPoint="AlteryxUnique" />
+    </Node>
+    <Node ToolID="42">
+      <GuiSettings Plugin="AlteryxBasePluginsGui.AlteryxSelect.AlteryxSelect">
+        <Position x="299" y="594" />
+      </GuiSettings>
+      <Properties>
+        <Configuration>
+          <OrderChanged value="False" />
+          <CommaDecimal value="False" />
+          <SelectFields>
+            <SelectField field="Customer_Name" selected="True" />
+            <SelectField field="Region" selected="True" />
+            <SelectField field="Business" selected="True" />
+            <SelectField field="Updated_On" selected="False" />
+            <SelectField field="*Unknown" selected="True" />
+          </SelectFields>
+        </Configuration>
+        <Annotation DisplayMode="0">
+          <Name />
+          <DefaultAnnotationText />
+          <Left value="False" />
+        </Annotation>
+      </Properties>
+      <EngineSettings EngineDll="AlteryxBasePluginsEngine.dll" EngineDllEntryPoint="AlteryxSelect" />
+    </Node>
+  </Nodes>
+  <Connections>
+    <Connection>
+      <Origin ToolID="25" Connection="Output" />
+      <Destination ToolID="20" Connection="Input" />
+    </Connection>
+    <Connection>
+      <Origin ToolID="20" Connection="Unique" />
+      <Destination ToolID="42" Connection="Input" />
+    </Connection>
+  </Connections>
+  <Properties>
+    <Memory default="True" />
+    <GlobalRecordLimit value="0" />
+    <TempFiles default="True" />
+    <Annotation on="True" includeToolName="False" />
+    <ConvertTimes value="False" />
+    <ErrorWarningOptions>
+      <ErrorLimit value="1000" />
+    </ErrorWarningOptions>
+  </Properties>
+</AlteryxDocument>

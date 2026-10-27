@@ -1,0 +1,9 @@
+__pycache__/
+.pytest_cache/
+.databricks/
+*.pyc
+.env
+output/
+.ruff_cache/
+spark-warehouse/
+metastore_db/
