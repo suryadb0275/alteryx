@@ -116,7 +116,7 @@ OWN = {
     "Text Input": (CONVERTED, "Embedded rows as a small DataFrame (VALUES in SQL)."),
     "Browse": (NOT_DATA, "Viewing aid; omitted."),
     "Output Data": (OTHER, "The converted table is written as a Delta table; an export to the original file / database destination is added by the user (the report says where)."),
-    "Date Time Now": (REPORTED, "Run-time clock input: add `current_timestamp()` where needed; reported."),
+    "Date Time Now": (CONVERTED, "One record, field DateTimeNow = the run's date-time in the tool's OutputFormat (the DTNEngine macro, read from its settings)."),
     "Directory": (REPORTED, "Lists files of a folder; use `dbutils.fs.ls` / `list_files` and a hand-off."),
     "Map Input": (NOT_DATA, "Interactive map selection input; replace with a parameter."),
     "Auto Insights Uploader": (OTHER, "Delivery to Alteryx Auto Insights."),
@@ -124,13 +124,13 @@ OWN = {
     "Filter": (CONVERTED, "True and False outputs; a NULL condition goes to False (as Alteryx)."),
     "Formula": (CONVERTED, "All translated functions (see 11-alteryx-function-reference.md); an untranslatable function blocks the tool, never guessed."),
     "Multi-Field Formula": (PARTIAL, "Review. Copy-output mode and _CurrentFieldType_ are reported."),
-    "Multi-Row Formula": (CONVERTED, "Review. Needs an explicit order; the help's default for a missing row (0 / empty) is NULL here - confirm."),
+    "Multi-Row Formula": (CONVERTED, "Needs an explicit order. Recursive forms: forward fill, and an IF with one [Row-1:f] result (carry-forward); others are reported with the expression."),
     "Select": (CONVERTED, "Rename, retype, size, deselect, order, *Unknown."),
     "Sort": (CONVERTED, "Review. Spark sorts by bytes, Alteryx by the language dictionary."),
     "Unique": (CONVERTED, "Review. Which row is kept needs an order (asked, never guessed)."),
-    "Record ID": (CONVERTED, "Review. Needs an order."),
+    "Record ID": (CONVERTED, "Needs an order, unless the new field is removed before any tool reads it. Also the CReW GroupByRecordID macro without groups."),
     "Generate Rows": (PARTIAL, "Review. Only 'init; [f] <= bound; DateTimeAdd | [f]+n' creating a new field."),
-    "Sample": (REPORTED, NO_XML + ". Rule from the help: position modes need an order; random modes are not reproducible."),
+    "Sample": (PARTIAL, "First / Last / Skip N (per group) from the workflow XML; the order of the records is asked when nothing sets it. Random modes are not reproducible."),
     "Random % Sample": (REPORTED, NO_XML + ". Rule: sample(fraction, seed) / orderBy(rand(seed)).limit(n); equality with Alteryx can only be checked by distribution."),
     "Rank": (REPORTED, "No parser converter, so the settings are not available."),
     "Select Records": (REPORTED, "No parser converter, so the settings are not available."),
@@ -145,15 +145,16 @@ OWN = {
     "Create Samples": (REPORTED, "No parser converter."),
     # Join
     "Join": (CONVERTED, "J / L / R outputs, select/rename/retype, collisions prefixed. Join by Record Position is reported."),
-    "Join Multiple": (REPORTED, "Output naming for colliding fields across inputs is not specified; send a sample of the Alteryx output."),
+    "Join Multiple": (CONVERTED, "Inputs named Input_#k_<field>, joined on their keys (inner or full outer), then the tool's own select; which tool is input #k comes from the field names, else it is asked."),
     "Union": (CONVERTED, "By name (missing columns allowed) and by position."),
     "Append Fields": (CONVERTED, "Cross join; field names must not collide."),
-    "Find Replace": (REPORTED, NO_XML + "."),
+    "Find Replace": (CONVERTED, "Settings read from the workflow XML: entire field / beginning / any part, case, whole word; replace the found text or append fields of R. "
+                                "Unmatched records pass unchanged; when several lookup records match, the first in the lookup's order is used."),
     "Fuzzy Match": (REPORTED, "Fuzzy matching has no exact Spark equivalent (levenshtein / soundex differ); reported."),
     "Make Group": (REPORTED, "No parser converter."),
     # Parse
     "DateTime": (CONVERTED, "Review. Java-style format letters pass through; Language ignored."),
-    "Text To Columns": (CONVERTED, "Review. To columns (N given) or to rows."),
+    "Text To Columns": (CONVERTED, "Delimiter, column count and extra-parts handling from the XML (<Delimeters>); option flags are reported."),
     "RegEx": (REPORTED, "Parse / Match / Replace / Tokenize rules are documented (12-tool-help-notes.md) but " + NO_XML + "."),
     "XML Parse": (REPORTED, NO_XML + "."),
     # Transform
@@ -298,9 +299,10 @@ def markdown() -> str:
     for key in (CONVERTED, PARTIAL, REPORTED, NOT_DATA, OTHER):
         lines.append(f"| {key} | {c.get(key, 0)} |")
     lines += ["", "**Where the gaps are:** the data-preparation core is converted (inputs, filter, formula, select, sort, join, union, summarize, cross tab, transpose, unique, record id, running total, multi-row / multi-field formula, "
-              "text to columns, datetime, dynamic rename, generate rows, append fields, count records, auto field). Sample, Random % Sample, Create Samples, Oversample Field, Rank, Select Records, Tile, "
-              "Multi-Field Binning, Find Replace, Imputation, Data Cleansing, RegEx, Weighted Average, Arrange, Make Columns, XML / JSON Parse, Dynamic Select / Replace / Input, Join Multiple, Make Group and Fuzzy Match "
-              "have a full recipe below but no automatic converter: the parser's model of their settings is approximate, so the skill reports them with the recipe and the original XML instead of guessing a setting.", ""]
+              "text to columns, datetime, dynamic rename, generate rows, append fields, count records, auto field, date time now). Sample (First / Last / Skip N), Find Replace, Join Multiple, Data Cleansing "
+              "and Imputation are converted from the settings in the workflow XML. Random % Sample, Create Samples, Oversample Field, Rank, Select Records, Tile, Multi-Field Binning, RegEx, Weighted Average, "
+              "Arrange, Make Columns, XML / JSON Parse, Dynamic Select / Replace / Input, Make Group and Fuzzy Match have a full recipe below but no automatic converter: the parser's model of their settings "
+              "is approximate, so the skill reports them with the recipe and the original XML instead of guessing a setting.", ""]
     for cat, names in TOOLS.items():
         lines += [f"## {cat}", ""]
         brief = [t for t in names if t not in TG.GUIDE]

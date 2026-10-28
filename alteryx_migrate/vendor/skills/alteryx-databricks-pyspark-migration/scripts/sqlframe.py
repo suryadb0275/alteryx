@@ -151,6 +151,9 @@ class Col:
     def over(self, window: "WindowSpec") -> "Col":
         return Col(f"{self.sql} OVER ({window.sql})")
 
+    def getField(self, name: str) -> "Col":                                     # noqa: N802 - a field of a struct
+        return Col(f"({self.sql}).{ident(name)}", name=name)
+
     def when(self, cond, value):
         raise SqlError("when() after a non-when expression")
 
@@ -203,7 +206,7 @@ FUNCTIONS = {
     "concat", "coalesce", "length", "upper", "lower", "initcap", "left", "right", "replace", "position", "lpad", "rpad", "reverse", "get", "split",
     "size", "regexp_extract_all", "regexp_replace", "try_divide", "format_string", "typeof", "floor", "ceil", "abs", "sqrt", "log", "log10", "exp",
     "pow", "round", "least", "greatest", "date_format", "try_to_timestamp", "current_date", "trunc", "last_day", "current_timestamp", "year",
-    "month", "dayofmonth", "hour", "minute", "second", "add_months", "date_add", "timestamp_seconds", "unix_timestamp", "datediff", "rank",
+    "month", "dayofmonth", "hour", "minute", "second", "date_trunc", "add_months", "date_add", "timestamp_seconds", "unix_timestamp", "datediff", "rank",
     "dense_rank", "row_number", "count", "sum", "avg", "min", "max", "median", "first", "last", "concat_ws", "collect_list", "percentile",
     "stddev_samp", "var_samp", "lag", "lead", "monotonically_increasing_id", "explode", "sequence", "to_date",
 }
@@ -222,6 +225,9 @@ class _Functions:
 
     def countDistinct(self, *cols):                                             # noqa: N802
         return Col(f"count(DISTINCT {', '.join(_as_col(c).sql for c in cols)})")
+
+    def last(self, col, ignorenulls=False):
+        return Col(f"last({_as_col(col).sql}{', true' if ignorenulls else ''})")
 
     def __getattr__(self, name):
         if name not in FUNCTIONS:
@@ -427,6 +433,8 @@ class AliasedFrame:
             return JoinFrame(self, other, on)
         if how in ("full", "outer", "full_outer"):
             return JoinFrame(self, other, on, "FULL OUTER")
+        if how in ("left", "left_outer", "leftouter"):
+            return JoinFrame(self, other, on, "LEFT OUTER")
         if how == "left_anti":
             f = self.frame
             return Frame(f.ctx, f.columns, {"select": [f"{self.alias_name}.{ident(c)}" for c in f.columns],
@@ -487,6 +495,11 @@ class _SparkShim:
         if not values:
             raise SqlError("createDataFrame() without rows")
         return Frame(self.ctx, names, {"values": values, "names": names}, [])
+
+    def range(self, n):                                                         # one-record sources (DateTime Now): spark.range(1)
+        if not isinstance(n, int) or not 0 < n <= 100:
+            raise SqlError("range() other than a small literal count")
+        return Frame(self.ctx, ["id"], {"values": ", ".join(f"({i})" for i in range(n)), "names": ["id"]}, [])
 
     def __getattr__(self, name):
         raise SqlError(f"spark.{name} has no verified SQL form")

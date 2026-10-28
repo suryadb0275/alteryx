@@ -1,0 +1,364 @@
+<?xml version="1.0"?>
+<AlteryxDocument yxmdVer="2021.3">
+  <Nodes>
+    <!-- A: Text To Columns (HR_CTC_MART [16]), DateTimeTrim "months" (ONBItaly [40]), Simple filter on a text field (ONBItaly [29]), Select of a missing field (CF [10]) -->
+    <Node ToolID="1">
+      <GuiSettings Plugin="AlteryxBasePluginsGui.TextInput.TextInput">
+        <Position x="100" y="100" />
+      </GuiSettings>
+      <Properties>
+        <Configuration>
+          <NumRows value="3" />
+          <Fields>
+            <Field name="ID" />
+            <Field name="Code" />
+            <Field name="Dt" />
+            <Field name="KPI" />
+          </Fields>
+          <Data>
+            <r><c>1</c><c>a-b-c</c><c>2024-03-17</c><c>9</c></r>
+            <r><c>2</c><c>x-y</c><c>2024-12-31</c><c>0</c></r>
+            <r><c>3</c><c>p</c><c>2023-01-01</c><c>KPI7</c></r>
+          </Data>
+        </Configuration>
+      </Properties>
+      <EngineSettings EngineDll="AlteryxBasePluginsEngine.dll" EngineDllEntryPoint="AlteryxTextInput" />
+    </Node>
+    <Node ToolID="2">
+      <GuiSettings Plugin="AlteryxBasePluginsGui.TextToColumns.TextToColumns">
+        <Position x="200" y="100" />
+      </GuiSettings>
+      <Properties>
+        <Configuration>
+          <Field>Code</Field>
+          <ErrorHandling>Last</ErrorHandling>
+          <RootName>Code</RootName>
+          <Delimeters value="-" />
+          <NumFields value="2" />
+          <Flags value="0" />
+        </Configuration>
+      </Properties>
+      <EngineSettings EngineDll="AlteryxBasePluginsEngine.dll" EngineDllEntryPoint="AlteryxTextToColumns" />
+    </Node>
+    <Node ToolID="3">
+      <GuiSettings Plugin="AlteryxBasePluginsGui.Formula.Formula">
+        <Position x="300" y="100" />
+      </GuiSettings>
+      <Properties>
+        <Configuration>
+          <FormulaFields>
+            <FormulaField expression="DateTimeTrim([Dt],&quot;months&quot;)" field="Month" size="10" type="Date" />
+          </FormulaFields>
+        </Configuration>
+      </Properties>
+      <EngineSettings EngineDll="AlteryxBasePluginsEngine.dll" EngineDllEntryPoint="AlteryxFormula" />
+    </Node>
+    <Node ToolID="4">
+      <GuiSettings Plugin="AlteryxBasePluginsGui.Filter.Filter">
+        <Position x="400" y="100" />
+      </GuiSettings>
+      <Properties>
+        <Configuration>
+          <Mode>Simple</Mode>
+          <Simple>
+            <Operator>!=</Operator>
+            <Field>KPI</Field>
+            <Operands>
+              <IgnoreTimeInDateTime>True</IgnoreTimeInDateTime>
+              <DateType>fixed</DateType>
+              <Operand>0</Operand>
+            </Operands>
+          </Simple>
+        </Configuration>
+      </Properties>
+      <EngineSettings EngineDll="AlteryxBasePluginsEngine.dll" EngineDllEntryPoint="AlteryxFilter" />
+    </Node>
+    <Node ToolID="5">
+      <GuiSettings Plugin="AlteryxBasePluginsGui.AlteryxSelect.AlteryxSelect">
+        <Position x="500" y="100" />
+      </GuiSettings>
+      <Properties>
+        <Configuration>
+          <OrderChanged value="False" />
+          <CommaDecimal value="False" />
+          <SelectFields>
+            <SelectField field="ID" selected="True" />
+            <SelectField field="Code1" selected="True" />
+            <SelectField field="Code2" selected="True" />
+            <SelectField field="Month" selected="True" />
+            <SelectField field="BSEG_WRBTR" selected="True" />
+            <SelectField field="*Unknown" selected="False" />
+          </SelectFields>
+        </Configuration>
+      </Properties>
+      <EngineSettings EngineDll="AlteryxBasePluginsEngine.dll" EngineDllEntryPoint="AlteryxSelect" />
+    </Node>
+    <!-- B: Join output names (HR_CTC_MART [7], CF [51]; Alteryx's own rename="Right_X", WalujGlass [46]) and a listed field the input lacks (ONB_PL [23]) -->
+    <Node ToolID="10">
+      <GuiSettings Plugin="AlteryxBasePluginsGui.TextInput.TextInput">
+        <Position x="100" y="300" />
+      </GuiSettings>
+      <Properties>
+        <Configuration>
+          <NumRows value="2" />
+          <Fields>
+            <Field name="K" />
+            <Field name="X" />
+          </Fields>
+          <Data>
+            <r><c>k1</c><c>left1</c></r>
+            <r><c>k2</c><c>left2</c></r>
+          </Data>
+        </Configuration>
+      </Properties>
+      <EngineSettings EngineDll="AlteryxBasePluginsEngine.dll" EngineDllEntryPoint="AlteryxTextInput" />
+    </Node>
+    <Node ToolID="11">
+      <GuiSettings Plugin="AlteryxBasePluginsGui.TextInput.TextInput">
+        <Position x="100" y="400" />
+      </GuiSettings>
+      <Properties>
+        <Configuration>
+          <NumRows value="2" />
+          <Fields>
+            <Field name="K" />
+            <Field name="X" />
+            <Field name="Y" />
+          </Fields>
+          <Data>
+            <r><c>k1</c><c>right1</c><c>y1</c></r>
+            <r><c>k3</c><c>right3</c><c>y3</c></r>
+          </Data>
+        </Configuration>
+      </Properties>
+      <EngineSettings EngineDll="AlteryxBasePluginsEngine.dll" EngineDllEntryPoint="AlteryxTextInput" />
+    </Node>
+    <Node ToolID="12">
+      <GuiSettings Plugin="AlteryxBasePluginsGui.Join.Join">
+        <Position x="200" y="350" />
+      </GuiSettings>
+      <Properties>
+        <Configuration joinByRecordPos="False">
+          <JoinInfo connection="Left">
+            <Field field="K" />
+          </JoinInfo>
+          <JoinInfo connection="Right">
+            <Field field="K" />
+          </JoinInfo>
+          <SelectConfiguration>
+            <Configuration outputConnection="Join">
+              <OrderChanged value="False" />
+              <CommaDecimal value="False" />
+              <SelectFields>
+                <SelectField field="Left_K" selected="True" input="Left_" />
+                <SelectField field="Left_X" selected="True" input="Left_" />
+                <SelectField field="Right_K" selected="False" rename="Right_K" input="Right_" />
+                <SelectField field="Right_X" selected="True" rename="Right_X" input="Right_" />
+                <SelectField field="Right_Y" selected="True" input="Right_" />
+                <SelectField field="Right_BA_DESCRIPTION" selected="True" input="Right_" />
+                <SelectField field="*Unknown" selected="False" />
+              </SelectFields>
+            </Configuration>
+          </SelectConfiguration>
+        </Configuration>
+      </Properties>
+      <EngineSettings EngineDll="AlteryxBasePluginsEngine.dll" EngineDllEntryPoint="AlteryxJoin" />
+    </Node>
+    <Node ToolID="13">
+      <GuiSettings Plugin="AlteryxBasePluginsGui.AlteryxSelect.AlteryxSelect">
+        <Position x="300" y="350" />
+      </GuiSettings>
+      <Properties>
+        <Configuration>
+          <OrderChanged value="False" />
+          <CommaDecimal value="False" />
+          <SelectFields>
+            <SelectField field="*Unknown" selected="True" />
+          </SelectFields>
+        </Configuration>
+      </Properties>
+      <EngineSettings EngineDll="AlteryxBasePluginsEngine.dll" EngineDllEntryPoint="AlteryxSelect" />
+    </Node>
+    <!-- C: recursive Multi-Row Formula with one [Row-1:f] result (Production Data [46]); CReW Record ID macro removed after a Filter (ONBItaly [160]) -->
+    <Node ToolID="20">
+      <GuiSettings Plugin="AlteryxBasePluginsGui.TextInput.TextInput">
+        <Position x="100" y="600" />
+      </GuiSettings>
+      <Properties>
+        <Configuration>
+          <NumRows value="6" />
+          <Fields>
+            <Field name="G" />
+            <Field name="Seq" type="Int32" />
+            <Field name="Last" type="Int32" />
+            <Field name="Day" type="Int32" />
+            <Field name="Plan" type="Double" />
+          </Fields>
+          <Data>
+            <r><c>a</c><c>1</c><c>30</c><c>30</c><c>9</c></r>
+            <r><c>a</c><c>2</c><c>30</c><c>10</c><c>5</c></r>
+            <r><c>a</c><c>3</c><c>30</c><c>30</c><c>7</c></r>
+            <r><c>a</c><c>4</c><c>30</c><c>30</c><c>8</c></r>
+            <r><c>a</c><c>5</c><c>30</c><c>31</c><c>4</c></r>
+            <r><c>b</c><c>1</c><c>30</c><c>12</c><c>6</c></r>
+          </Data>
+        </Configuration>
+      </Properties>
+      <EngineSettings EngineDll="AlteryxBasePluginsEngine.dll" EngineDllEntryPoint="AlteryxTextInput" />
+    </Node>
+    <Node ToolID="21">
+      <GuiSettings Plugin="AlteryxBasePluginsGui.MultiRowFormula.MultiRowFormula">
+        <Position x="200" y="600" />
+      </GuiSettings>
+      <Properties>
+        <Configuration>
+          <UpdateField value="True" />
+          <UpdateField_Name>Plan</UpdateField_Name>
+          <CreateField_Name>New Field</CreateField_Name>
+          <CreateField_Type>Int32</CreateField_Type>
+          <CreateField_Size>4</CreateField_Size>
+          <OtherRows>Empty</OtherRows>
+          <NumRows value="1" />
+          <Expression>if ([Last] &gt; [Day]) then [Plan]
+elseif ([Last] = [Day]) then [Row-1:Plan]
+else 0
+endif</Expression>
+          <GroupByFields>
+            <Field field="G" />
+          </GroupByFields>
+        </Configuration>
+      </Properties>
+      <EngineSettings EngineDll="AlteryxBasePluginsEngine.dll" EngineDllEntryPoint="AlteryxMultiRowFormula" />
+    </Node>
+    <Node ToolID="22">
+      <GuiSettings>
+        <Position x="300" y="600" />
+      </GuiSettings>
+      <Properties>
+        <Configuration>
+          <Value name="FieldName">RecordID</Value>
+          <Value name="LastColumn">False</Value>
+          <Value name="StartingValue">1</Value>
+          <Value name="GroupingFields">""</Value>
+        </Configuration>
+      </Properties>
+      <EngineSettings Macro="_externals\1\CReW GroupByRecordID.yxmc" />
+    </Node>
+    <Node ToolID="23">
+      <GuiSettings Plugin="AlteryxBasePluginsGui.Filter.Filter">
+        <Position x="400" y="600" />
+      </GuiSettings>
+      <Properties>
+        <Configuration>
+          <Expression>[Seq] &gt; 0</Expression>
+          <Mode>Custom</Mode>
+        </Configuration>
+      </Properties>
+      <EngineSettings EngineDll="AlteryxBasePluginsEngine.dll" EngineDllEntryPoint="AlteryxFilter" />
+    </Node>
+    <Node ToolID="24">
+      <GuiSettings Plugin="AlteryxBasePluginsGui.AlteryxSelect.AlteryxSelect">
+        <Position x="500" y="600" />
+      </GuiSettings>
+      <Properties>
+        <Configuration>
+          <OrderChanged value="False" />
+          <CommaDecimal value="False" />
+          <SelectFields>
+            <SelectField field="RecordID" selected="False" />
+            <SelectField field="*Unknown" selected="True" />
+          </SelectFields>
+        </Configuration>
+      </Properties>
+      <EngineSettings EngineDll="AlteryxBasePluginsEngine.dll" EngineDllEntryPoint="AlteryxSelect" />
+    </Node>
+    <!-- D: DateTime Now tool (Production Data [337]) -->
+    <Node ToolID="30">
+      <GuiSettings Plugin="DateTimeNow">
+        <Position x="100" y="800" />
+      </GuiSettings>
+      <Properties>
+        <Configuration>
+          <Value name="Language">English</Value>
+          <Value name="OutputFormat">yyyy-MM-dd hh:mm:ss</Value>
+        </Configuration>
+      </Properties>
+      <EngineSettings Macro="DateTimeNow\Supporting_Macros\DTNEngine.yxmc" EngineDll="Macro" EngineDllEntryPoint="DateTimeNow\Supporting_Macros\DTNEngine.yxmc" />
+    </Node>
+    <Node ToolID="31">
+      <GuiSettings Plugin="AlteryxBasePluginsGui.AlteryxSelect.AlteryxSelect">
+        <Position x="200" y="800" />
+      </GuiSettings>
+      <Properties>
+        <Configuration>
+          <OrderChanged value="False" />
+          <CommaDecimal value="False" />
+          <SelectFields>
+            <SelectField field="*Unknown" selected="True" />
+          </SelectFields>
+        </Configuration>
+      </Properties>
+      <EngineSettings EngineDll="AlteryxBasePluginsEngine.dll" EngineDllEntryPoint="AlteryxSelect" />
+    </Node>
+    <!-- E: Block Until Done with a second output (WalujGlass_COQ_v5 [73]) -->
+    <Node ToolID="40">
+      <GuiSettings Plugin="AlteryxBasePluginsGui.BlockUntilDone.BlockUntilDone">
+        <Position x="200" y="1000" />
+      </GuiSettings>
+      <Properties>
+        <Configuration />
+      </Properties>
+      <EngineSettings EngineDll="AlteryxBasePluginsEngine.dll" EngineDllEntryPoint="AlteryxBlockUntilDone" />
+    </Node>
+    <Node ToolID="41">
+      <GuiSettings Plugin="AlteryxBasePluginsGui.Formula.Formula">
+        <Position x="300" y="950" />
+      </GuiSettings>
+      <Properties>
+        <Configuration>
+          <FormulaFields>
+            <FormulaField expression="&quot;first&quot;" field="Branch" size="10" type="V_WString" />
+          </FormulaFields>
+        </Configuration>
+      </Properties>
+      <EngineSettings EngineDll="AlteryxBasePluginsEngine.dll" EngineDllEntryPoint="AlteryxFormula" />
+    </Node>
+    <Node ToolID="42">
+      <GuiSettings Plugin="AlteryxBasePluginsGui.Formula.Formula">
+        <Position x="300" y="1050" />
+      </GuiSettings>
+      <Properties>
+        <Configuration>
+          <FormulaFields>
+            <FormulaField expression="&quot;second&quot;" field="Branch" size="10" type="V_WString" />
+          </FormulaFields>
+        </Configuration>
+      </Properties>
+      <EngineSettings EngineDll="AlteryxBasePluginsEngine.dll" EngineDllEntryPoint="AlteryxFormula" />
+    </Node>
+  </Nodes>
+  <Connections>
+    <Connection><Origin ToolID="1" Connection="Output" /><Destination ToolID="2" Connection="Input" /></Connection>
+    <Connection><Origin ToolID="2" Connection="Output" /><Destination ToolID="3" Connection="Input" /></Connection>
+    <Connection><Origin ToolID="3" Connection="Output" /><Destination ToolID="4" Connection="Input" /></Connection>
+    <Connection><Origin ToolID="4" Connection="True" /><Destination ToolID="5" Connection="Input" /></Connection>
+    <Connection><Origin ToolID="10" Connection="Output" /><Destination ToolID="12" Connection="Left" /></Connection>
+    <Connection><Origin ToolID="11" Connection="Output" /><Destination ToolID="12" Connection="Right" /></Connection>
+    <Connection><Origin ToolID="12" Connection="Join" /><Destination ToolID="13" Connection="Input" /></Connection>
+    <Connection><Origin ToolID="20" Connection="Output" /><Destination ToolID="21" Connection="Input" /></Connection>
+    <Connection><Origin ToolID="21" Connection="Output" /><Destination ToolID="22" Connection="Input" /></Connection>
+    <Connection><Origin ToolID="22" Connection="Output" /><Destination ToolID="23" Connection="Input" /></Connection>
+    <Connection><Origin ToolID="23" Connection="True" /><Destination ToolID="24" Connection="Input" /></Connection>
+    <Connection><Origin ToolID="30" Connection="DTN" /><Destination ToolID="31" Connection="Input" /></Connection>
+    <Connection><Origin ToolID="10" Connection="Output" /><Destination ToolID="40" Connection="Input" /></Connection>
+    <Connection><Origin ToolID="40" Connection="Output" /><Destination ToolID="41" Connection="Input" /></Connection>
+    <Connection><Origin ToolID="40" Connection="Output2" /><Destination ToolID="42" Connection="Input" /></Connection>
+  </Connections>
+  <Properties>
+    <Memory default="True" />
+    <GlobalRecordLimit value="0" />
+    <TempFiles default="True" />
+    <Annotation on="True" includeToolName="False" />
+    <ConvertTimes value="False" />
+  </Properties>
+</AlteryxDocument>

@@ -243,7 +243,8 @@ def describe_tool(wf, info: dict, nid: int, reason: str, roots: set, container: 
     notebook = "03_gold.ipynb" if layer == "gold" else "02_silver.ipynb"
     return {"id": int(nid), "name": tool_name(wf, nid), "plugin": str(wf.nodes[nid].get("original_plugin_name") or ""), "container": container,
             "status": "cannot be converted" if nid in roots else "waits for " + ", ".join(f"[{r}] {tool_name(wf, r)}" for r in waits),
-            "decision": "order" if "record order" in reason or "order key" in reason else "", "reason": reason, "after": where_text(wf, before, "nothing (this tool starts the flow)"), "before": where_text(wf, after, "nothing (this tool ends the flow)"), "layer": layer, "notebook": notebook}
+            "decision": "order" if "record order" in reason or "order key" in reason else "", "reason": reason,
+            "data_input": any(not str(e.dst_anchor).lower().startswith("control") for e in wf.producers(nid)), "after": where_text(wf, before, "nothing (this tool starts the flow)"), "before": where_text(wf, after, "nothing (this tool ends the flow)"), "layer": layer, "notebook": notebook}
 
 
 def estimate_tokens(text: str) -> int:
@@ -284,14 +285,21 @@ def decisions_from_choices(choices: dict) -> dict:
             if c:
                 out["field_types"] = dict(c)
             continue
+        if tool == "_macros":                               # {macro file: {"as_source": true, "table": "catalog.schema.table"}}
+            if c:
+                out["macros"] = dict(c)
+            continue
         if tool == "_join_inputs":                          # {join multiple tool id: {"#1": tool id feeding it, ...}}
             if c:
                 out["join_inputs"] = {str(k): dict(v) for k, v in c.items()}
             continue
+        if str(tool).startswith("_"):                       # the report's records (_auto: who decided what, _left_to_model): not answers for the skill
+            continue
         if c.get("mode") == "any":
             any_row.append(int(tool))
         elif c.get("mode") == "order_by" and c.get("fields"):
-            overrides[str(int(tool))] = {"order_by": [{"field_name": f, "ascending": bool(c.get("ascending", True))} for f in c["fields"]]}
+            desc = set(c.get("desc") or [])
+            overrides[str(int(tool))] = {"order_by": [{"field_name": f, "ascending": bool(c.get("ascending", True)) and f not in desc} for f in c["fields"]]}
     if any_row:
         out["accept"] = {"order_any": sorted(any_row)}
     if overrides:
@@ -396,7 +404,8 @@ def plan_workflow(yxmd: Path, mapping: Path, slim: Path, doc: dict, work: Path, 
     cov = built["coverage"].get("summary", {}) if isinstance(built["coverage"], dict) else {}
     analysis = Analysis(file_name=file_name, sha256=sha, tool_count=int(doc["workflow"].get("tool_count") or 0),
                         container_count=len(info["caption"]), unsupported=unsupported, chunks=chunks,
-                        inputs={k: {"source_tables": list(v["source_tables"]), "query": v["query"], "plugin": _plugin_of(wf, v["nodes"][0]) if v.get("nodes") else "",
+                        inputs={k: {"source_tables": list(v["source_tables"]), "query": v["query"], "tools": [int(n) for n in v.get("nodes") or []],
+                                "plugin": _plugin_of(wf, v["nodes"][0]) if v.get("nodes") else "",
                                 "connection": str(wf.nodes[v["nodes"][0]].get("connection_string") or "") if v.get("nodes") else ""} for k, v in built["bronze"].items()},
                         outputs=[c.id for c in chunks], macros_missing=missing, coverage=cov, workdir=str(work),
                         warnings=[f"macro not uploaded: {m}" for m in missing], inventory=inventory,

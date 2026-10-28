@@ -40,3 +40,4 @@ def _no_local_settings(monkeypatch, request):
         monkeypatch.setattr(env, "load", lambda *a, **k: [])
     for name in ("MODEL", "CATALOG", "SCHEMA", "SQL_DIALECT", "SOURCE_CATALOG", "SOURCE_SCHEMA", "DATABRICKS_HOST", "DATABRICKS_TOKEN"):
         monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("ALTERYX_ANSWERS_DIR", str(request.getfixturevalue("tmp_path") / "answers"))    # remembered answers: per test, never in the repo

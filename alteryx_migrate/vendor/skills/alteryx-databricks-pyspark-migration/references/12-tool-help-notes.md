@@ -18,11 +18,14 @@ Page-level notes that apply to every tool: role/edition remarks (Full vs Basic u
 ### Join (`Join`; outputs J / L / R) - supported
 Help: Join by Specific Fields or by Record Position; J = matched, L / R = unmatched; per-column select, rename, type, size; `*Unknown` selected by default; *Deselect Duplicate Columns*; key types must match (Double/Float keys discouraged; blob/spatial cannot join).
 Not stated: NULL keys, string case, duplicate keys. Gen: see "Join - rules from the Alteryx help" in `03`. **Gap:** Join by Record Position (blocked).
+Output names (from the XML): every field is written `Left_X` / `Right_X` with `input="Left_"`/`"Right_"`; the output name is the `rename` attribute when there is one, else the plain `X`. Alteryx itself writes `rename="Right_X"` on a field whose name collided, so a rename equal to the field keeps the prefix. `*Unknown` (no `input`) applies to both sides. A listed field the input does not have is left out, as Alteryx does (with a warning).
+Open question (BUG-12): the generator drops the right input's join keys unless the configuration lists them; CF_MasterData [91] deselects only the `Left_` keys with `*Unknown` on, which suggests Alteryx keeps the right keys. Not changed until one Alteryx output row confirms it.
+NULL text (BUG-16, risk): Alteryx is said to compare a NULL string as empty (`null != 'x'` is true); Spark gives NULL, so the record goes to the False side. The option `project.null_string_as_empty` (off by default) writes `coalesce(col, '')` in `=` / `!=` on text fields; confirm with one sample before turning it on.
 
-### Join Multiple - unsupported
+### Join Multiple - supported (from the XML)
 Help: joins **two or more** inputs; default is a **full outer** join; by Specific Fields (a key per input; same-name key auto-selected) or by Record Position; checkbox *Only Output Records that Join from All Inputs* (off = all records, NULLs where no match); Cartesian handling Allow / Warn above 16 records / Error above 16; per-column select, type, size, rename, `*Unknown`, *Deselect Duplicate Columns*, prefix/suffix actions.
 Not stated: output row order, anchor layout, the exact name given to colliding columns across inputs.
-Rule when implemented: chain `join` over the key list per input, `full` unless the checkbox is on (then `inner`); colliding names need a user rule. Until then: blocked ("send an Alteryx sample"), downstream waits.
+Gen: chain `join` over the key list per input, `full` unless the checkbox is on (then `inner`). Fields are named `Input_#k_<field>` in the settings; the output name is the rename, else the field's own name without `Input_#k_` (the tools after it use the plain names, e.g. WalujGlass [72] reads `SRC`). A name an earlier output field already has keeps its `Input_#k_` name and is reviewed.
 
 ### Cross Tab - requires_review
 Help: group fields, header field (each unique value becomes a column), value field, aggregation chosen **by the data type of the value field** - string: Concatenate (separator, field size), First, Last, Count Distinct (with / without nulls); number: Sum, Average, Count (with / without nulls), Count Distinct, Percent Row, Percent Column, Total Column, Total Row. A prefix (`AVG_`, `SUM_`, `COUNT_`...) is added to the header unless the method is Sum, First or Last alone. Header values that differ only in case are **one** column. Special characters in new names are replaced by `_` unless *Retain Special Characters* (AMP). Up to 32,000 columns.
@@ -40,7 +43,7 @@ Not stated: ordering option, NULL handling. Gen: window sum `unboundedPreceding.
 ### Multi-Row Formula - requires_review
 Help: updates **one field per instance** (existing or new, with type and size); *Num Rows* sets how many rows above / below are available (Row-1, Row+0, Row+1, ...); rows that do not exist return **Null**, **0 or Empty (default)**, or **the closest valid row**; optional Group By.
 Not stated: row order, behaviour at the end of data (assume symmetric to the start).
-Gen: `F.lag/F.lead` over `partitionBy(group).orderBy(order)`. **Gap: the help's default for a missing row is 0 / empty, but the generator currently yields NULL** (as `03` says). Until fixed, a Multi-Row Formula whose XML setting is not "Null" must be treated as *Requires review*; the fix is `coalesce(lag/lead, 0 or '')`, and for "closest valid row" `first/last(..., ignorenulls)` over the frame. Recursive reference to its own output stays unsupported.
+Gen: `F.lag/F.lead` over `partitionBy(group).orderBy(order)`, with 0 / '' for a missing row when the setting is Empty. A reference to its own output (recursive) has two rules: the forward fill `IF IsNull([f]) THEN [Row-1:f] ELSE [f]` (also `[f] = Null()`), and in general an IF / IIF with exactly one result `[Row-1:f]` and no other row reference: a row where that branch applies repeats the value of the last row (in the group, in order) where it did not - `last(when(not carry, struct(value)), ignorenulls)` over the running frame; before the first such row 'other rows' applies. Any other recursive form is reported with its expression.
 
 ### Multi-Field Formula - requires_review
 Help: field-type filter (Numeric, Text, SpatialObj, Bool, DateTime, Time, All); the same expression for each selected field; `_CurrentField_`, `_CurrentFieldName_`, `_CurrentFieldType_`; *Copy Output Fields* creates new columns with a prefix or suffix, otherwise the originals are updated; optional output type and size.
@@ -72,7 +75,10 @@ Not stated: case sensitivity, NULL handling. Gen: `row_number()` over the keys i
 
 ### Record ID - requires_review
 Help: new column with name, **starting value**, type (for a String the size is the length, **padded with leading zeros**), position first or last, optional Group By (restarts per group).
-Gen: one global `row_number()` over the order plus start - 1, cast to int / smallint / bigint, selected **first**. **Gap (not implemented, verify before relying on it):** Group By (needs `Window.partitionBy(group)`), String type with zero padding (`F.lpad(.., size, '0')`), and position "last". A Record ID that uses any of these must be reviewed.
+Gen: one global `row_number()` over the order plus start - 1, cast to int / smallint / bigint, selected first (or last). When every path from the tool removes the new field (through Filters, Formulas, Sorts that do not read it, up to a Select that deselects it) the number is never seen: the rows pass through and no order is asked (ONBItaly [160]). The CReW `GroupByRecordID` macro without grouping fields is the same tool (FieldName, StartingValue, LastColumn). **Gap:** Group By (reported), String type with zero padding.
+
+### DateTime Now - supported
+The tool is the macro `DTNEngine.yxmc` (installed with Designer): one record, one text field `DateTimeNow` = the run's date-time in the chosen `OutputFormat` (anchor `DTN`). Gen: `spark.range(1).select(date_format(current_timestamp(), <format>))`; depends on the session time zone.
 
 ### Sort - requires_review
 Help: dictionary order (default for English, French, German, Italian, Portuguese, Spanish: lowercase before uppercase, numeric strings by value, punctuation first) or Unicode code point (uppercase first; "10" before "2"); per-column Ascending / Descending, top to bottom; **stable**.
@@ -101,7 +107,8 @@ Gen: GroupBy, Sum, Avg, Min, Max, Count, CountNonNull, CountDistinct, Median, St
 
 ### Text To Columns - requires_review
 Help: each character of the delimiter field is a separate delimiter (`\t`, `\n`, `\s`, `\s\t`); split to columns (number of columns, extra characters: leave in the last column / drop with warning / drop silently / error; root name + serial number) or to rows (a key column tracks the record); options to ignore delimiters in quotes, single quotes, parentheses, brackets; skip empty columns.
-Gen: `F.split` + `F.get`, rows mode by `explode`. **Gap:** ignore-in-quotes / brackets, skip-empty, and the extra-character policies other than "leave in last column" (blocked when set).
+Settings in the XML: `<Delimeters value="..."/>` (Alteryx's spelling - the parser missed it and fell back to ',', BUG-03), `<NumFields value>`, `<RootName>`, `<ErrorHandling>Last|Drop</ErrorHandling>`, `<Flags value>`. A missing delimiter is asked, never assumed.
+Gen: `F.split(col, delim, N)` + `F.get` for 'leave extra in last column' (the limit keeps the rest in the last part), `F.split` + `F.get` for Drop; rows mode by `explode`. **Gap:** Flags other than 0 (quotes / brackets / skip empty) are reported.
 
 ### RegEx - unsupported
 Help: Boost / Perl syntax; **Case Insensitive on by default**; methods Replace (with marked groups, optional copy unmatched), Parse (named output columns with type and size), Tokenize (one marked group; to columns or rows), Match (1 / 0 into a named column; *Error if not Matched*).
@@ -112,6 +119,7 @@ Help: date-time -> string or string -> date-time; presets per language (8 langua
 Gen: `F.try_to_timestamp` with the format letters passed through. **Gap:** the two-digit-year window, `ffff` sub-seconds precision, language-specific names - reviewed.
 
 ### Filter - supported
+Simple mode: the operand is typed text compared as the field's type - a number is written unquoted only for a numeric field, else as text (`KPI != '0'`, ONBItaly [29]; a quoted literal also compares correctly with a numeric column).
 Help: Basic (one column, type-dependent operator) or Custom (expression); **T** / **F** outputs; string *Is empty* matches NULL **and** `""`, *Is null* matches only NULL; *Does not contain* is case sensitive; date ranges and today / yesterday / tomorrow are dynamic; numbers over 15 digits lose precision.
 Gen: NULL conditions go to F (see `03`). Rules to hold for Basic operators: `Is empty` = `isNull() | == ''`, `Is null` = `isNull()`, string `contains` case-sensitive for "Does not contain". **Gap/verify:** the date operators (today, yesterday, Range, periods after / before) must use the run date from the project settings, never the clock; check the translation in the report.
 

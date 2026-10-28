@@ -10,7 +10,7 @@ import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import ai as ai_mod, engine, pytool, sqlsrc, templates, versions
+from . import ai as ai_mod, autodecide, context, engine, pytool, sqlsrc, templates, versions
 
 WORKFLOW_SUFFIXES = (".yxmd", ".yxzp")
 
@@ -35,11 +35,19 @@ class Result:
 def mapping_defaults(inputs: dict, outputs: list, catalog: str, schema: str) -> dict:
     """Every Bronze input and every output table lives in catalog.schema under the skill's table name."""
     base = ".".join(x for x in (catalog, schema) if x)           # no catalog and no schema: bare names, resolved by the current catalog/schema when the notebook runs
-    return {"inputs": {k: (f"{base}.{k}" if base else k) for k in sorted(inputs)}, "outputs": {t: (f"{base}.{t}" if base else t) for t in outputs}}
+
+    def where(key):                                               # a macro the user said only reads data: its catalog.schema.table as given
+        info = inputs[key] if isinstance(inputs, dict) else {}
+        given = [t for t in info.get("source_tables") or [] if t.count(".") == 2] if str(info.get("plugin", "")).startswith("macro:") else []
+        return given[0] if len(given) == 1 else (f"{base}.{key}" if base else key)
+    return {"inputs": {k: where(k) for k in sorted(inputs)}, "outputs": {t: (f"{base}.{t}" if base else t) for t in outputs}}
 
 
 def decision_lines(choices: dict) -> list:
     lines = []
+    for macro, m in ((choices or {}).get("_macros") or {}).items():
+        tools = f" (tool {', '.join('[%s]' % i for i in m['tools'])})" if m.get("tools") else ""
+        lines.append(f"Macro {macro}{tools}: only reads data, which is in the table {m.get('table')}.")
     for tool, slots in ((choices or {}).get("_join_inputs") or {}).items():
         lines.append(f"Tool [{tool}] (Join Multiple): " + ", ".join(f"input {k} comes from tool [{t}]" for k, t in slots.items()) + ".")
     types = (choices or {}).get("_field_types") or {}
@@ -49,8 +57,35 @@ def decision_lines(choices: dict) -> list:
         if c.get("mode") == "any":
             lines.append(f"Tool [{tool}]: any row may be kept (the order of the incoming rows does not matter).")
         elif c.get("mode") == "order_by" and c.get("fields"):
-            lines.append(f"Tool [{tool}]: rows are ordered by {', '.join(c['fields'])} ({'ascending' if c.get('ascending', True) else 'descending'}) before the first one is kept.")
+            desc = set(c.get("desc") or []) | (set(c["fields"]) if not c.get("ascending", True) else set())
+            lines.append(f"Tool [{tool}]: rows are ordered by {', '.join(f + (' (descending)' if f in desc else '') for f in c['fields'])}.")
     return lines
+
+
+def review_md(choices: dict) -> str:
+    """'Decisions made for you (please review)': every order decided by a rule, the model, an earlier run or the user, with its evidence and the --decisions
+    line that overrides it; and the tools left to the model without a question."""
+    auto = (choices or {}).get("_auto") or {}
+    left = (choices or {}).get("_left_to_model") or []
+    if not auto and not left:
+        return ""
+    import json
+    lines = ["## Decisions made for you (please review)", ""]
+    if auto:
+        lines += ["Alteryx keeps the order rows arrive in; Spark has none. These tools depend on it and nothing in the workflow sorts the rows before them. "
+                  "To change a decision, pass the line in the last column in a `--decisions` JSON file (or run with `--ask-all`).", "",
+                  "| Tool | Name | Container | Decision | Source | Confidence | Evidence | Override (`--decisions`) |", "|---|---|---|---|---|---|---|---|"]
+        for key in sorted(auto, key=lambda k: int(k)):
+            e = auto[key]
+            d = e.get("decision") or {}
+            cell = lambda s: str(s).replace("|", "\\|").replace("\n", " ")                             # noqa: E731
+            lines.append(f"| [{key}] | {cell(e.get('name', ''))} | {cell(e.get('container', ''))} | {cell(autodecide.describe(d))} | {cell(e.get('source', ''))} | "
+                         f"{cell(e.get('confidence', ''))} | {cell(e.get('why', ''))} | `{json.dumps({key: d})}` |")
+        lines.append("")
+    if left:
+        lines += ["Left to the model without a question (the skills describe these tools; the model gets their settings, the slimmed JSON and the recipe): "
+                  + ", ".join(f"[{x['id']}] {x.get('name', '')}" for x in left) + ".", ""]
+    return "\n".join(lines)
 
 
 def convert_workflow(workflow: Path, out_dir: Path, catalog: str = "", schema: str = "", decisions: dict | None = None, schemas: dict | None = None,
@@ -127,6 +162,7 @@ def convert_workflow(workflow: Path, out_dir: Path, catalog: str = "", schema: s
     statuses = {c["id"]: ("ok" if c["strategy"] == "template" else "unsupported") for c in chunks}
     summary = analysis.summary()
     lines = decision_lines(decisions or {})
+    review = review_md(decisions or {})
     waiting = [u["id"] for c in chunks for u in c["unconverted"]] + [u["id"] for u in summary["unsupported"]]
     details = {n["node_id"]: n for n in engine.slim_nodes(handles["slim_dir"], sorted(set(waiting)))}       # the slimmed settings of every tool that needs an update
     for tid, xml in engine.raw_configs(analysis.workdir, set(waiting) | {t["id"] for c in chunks if c["strategy"] == "llm" for t in c["tools"]}).items():
@@ -147,18 +183,22 @@ def convert_workflow(workflow: Path, out_dir: Path, catalog: str = "", schema: s
                 ai_info["errors"][cid] = w.error
     files = templates.build_notebooks(analysis.file_name, chunks, codes, statuses, maps["inputs"], maps["outputs"], summary["inputs"], summary["unsupported"], lines, asked=asked,
                                       details=details, ai=ai_info,
-                                      bronze_sql=bronze_sql)
+                                      bronze_sql=bronze_sql, review=review)
     if "sql" in formats:
         files.update(templates.build_sql_notebooks(analysis.file_name, chunks, statuses, maps["inputs"], maps["outputs"], asked, details, ai_info))
     if "pyspark" not in formats:                                                  # the config and bronze notebooks stay: the SQL needs the table names they document
         for name in templates.LAYER_FILE.values():
             files.pop(name, None)
     meta = {"run_id": "-", "user": "-", "file_name": analysis.file_name, "skill_version": versions.skill_version(), "app_version": "-", "endpoint": getattr(model, "model", "")}
-    report = templates.report(meta, chunks, statuses, {}, summary["unsupported"], {c["id"]: 1 for c in chunks if c["id"] in codes}, lines, ai_info)
+    report = templates.report(meta, chunks, statuses, {}, summary["unsupported"], {c["id"]: 1 for c in chunks if c["id"] in codes}, lines, ai_info, review=review)
     written = []
     for name, text in files.items():
         (out_dir / name).write_text(text, encoding="utf-8")
         written.append(name)
+    ctx = context.build(analysis, handles, chunks, codes, statuses, ai_info, bronze_sql, maps, decisions or {}, asked, modules)     # the full context: every tool, every gap
+    report += context.markdown(ctx)
+    (out_dir / "conversion_context.json").write_text(json.dumps(ctx, indent=1, default=str), encoding="utf-8")
+    written.append("conversion_context.json")
     (out_dir / "conversion_report.md").write_text(report, encoding="utf-8")
     if modules:                                                                 # util files: a `utils` package next to the notebooks, used as `from utils import python_tool_17`
         (out_dir / "utils").mkdir(exist_ok=True)

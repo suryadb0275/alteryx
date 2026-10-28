@@ -70,6 +70,10 @@ Source of truth for what an Alteryx function or operator means. `04-expression-t
 - `DateTimeToLocal(dt,[tz])`: Converts UTC date-time to local time zone.
 - `DateTimeToUTC(dt,[tz])`: Converts date-time to UTC.
 - `DateTimeTrim(dt,t)`: Removes unwanted portions of a date-time.
+  - Every part is a **truncation**, per the help: `firstofmonth` = `month` = midnight of the 1st of the month; `year` = midnight of 1 January; `day` = midnight; `hour` / `minute` / `second` = the start of it; `lastofmonth` = one second before the end of the month.
+  - The result is the date-time text `yyyy-MM-dd HH:mm:ss` (the help's examples: `2016-01-01 00:00:00`); a plural part name (`months`, used in the workflows) is the same part.
+  - Spark: `date_format(trunc(ts,'month'|'year'), 'yyyy-MM-dd HH:mm:ss')`, `date_trunc('day'|'hour'|'minute'|'second', ts)`, `last_day(ts)` + ` 23:59:59`. An output field of type Date keeps the date part (`cast('date')`).
+  - Earlier versions returned the part as text (`'MM'` -> `03`), which a Date field turned into NULL (BUG-02).
 - `DateTimeWeekNum(dt, [StartOfWeek])`: Returns the week number of the year.
 - `DateTimeWorkDays(dt1, dt2, [StartofWeek])`: Returns number of working days between two dates.
 - `DateTimeYear(dt)`: Returns the numeric value for the year.

@@ -49,7 +49,7 @@ def test_without_types_pyspark_decides_at_run_time_and_the_answer_gives_sql(tmp_
     analysis, _ = engine.analyze(flow, tmp_path / "work")
     assert analysis.type_questions == [{"id": 2, "name": "Data Cleansing", "container": "(no container)", "fields": ["Name", "City", "Amount"]}]
     pipeline.convert_workflow(flow, tmp_path / "a", "main", "s")
-    assert "dict(customers_cleansed.dtypes)" in cells(tmp_path / "a" / "03_gold.ipynb")                  # like the macro: by the real type, at run time
+    assert "{n.lower(): t for n, t in customers_cleansed.dtypes}" in cells(tmp_path / "a" / "03_gold.ipynb")                  # like the macro: by the real type, at run time
     assert "NO SQL" in cells(tmp_path / "a" / "03_gold_sql.ipynb")
     pipeline.convert_workflow(flow, tmp_path / "b", "main", "s", {"_field_types": {"Name": "string", "City": "string", "Amount": "number"}})
     assert "dtypes" not in cells(tmp_path / "b" / "03_gold.ipynb") and "upper(`Name`)" in cells(tmp_path / "b" / "03_gold_sql.ipynb")

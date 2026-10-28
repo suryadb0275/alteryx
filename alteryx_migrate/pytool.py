@@ -78,6 +78,19 @@ def _slimmer():
     return analyse_cell, split_cells, build_slices
 
 
+def _schemas(wf) -> dict:
+    """{tool id: [{name, type, size}]} from the MetaInfo of each tool's output in the workflow XML ({} without it)."""
+    if not getattr(wf, "yxmd", None):
+        return {}
+    if not hasattr(wf, "_xml_schemas"):
+        try:
+            import xml_recover
+            wf._xml_schemas = {tid: t.schema for tid, t in xml_recover.load(wf.yxmd).items()}
+        except (ImportError, OSError, ValueError):
+            wf._xml_schemas = {}
+    return wf._xml_schemas
+
+
 def load(slim_dir: Path, wf) -> dict:
     """{tool id: Info} for every embedded Python tool of the slimmed workflow."""
     analyse_cell, split_cells, build_slices = _slimmer()
@@ -106,6 +119,9 @@ def load(slim_dir: Path, wf) -> dict:
             matches = [i for i, (s, _a) in enumerate(flat) if s == src]
             inputs[n] = {"variable": variables.get(n, ""), "stream": flat[matches[0]] if matches else None, "index": matches[0] if len(matches) == 1 else None,
                          "verified": (bool(item.get("verified_in_xml")) or len(ref.get("inputs") or {}) == 1) and len(matches) == 1}
+        for item in inputs.values():                                       # Date/DateTime fields of each input, from the workflow's MetaInfo of the tool feeding it
+            schema = _schemas(wf).get(item["stream"][0]) if item["stream"] else None
+            item["dates"] = sorted({f["name"] for f in schema or [] if str(f.get("type") or "").lower() in ("date", "datetime")})
         anchors = {a: f"Output{a}" for a in sorted(slices)}
         consumed = sorted({int(re.sub(r"\D", "", a)) for (n, a) in wf.outputs if n == tool and re.search(r"\d", a)})
         out[tool] = Info(tool, str(node.get("original_tool_type") or "JupyterCode"), cells, slices, inputs, sorted(slices), anchors, consumed)
@@ -417,19 +433,24 @@ def keep(info: Info) -> Result:
         return result
     name = f"python_tool_{info.tool}"
     params = ", ".join(["spark"] + [f"input_{n}" for n in sorted(info.inputs)])
-    convert = "".join(f"    input_{n} = input_{n}.toPandas()\n" for n in sorted(info.inputs))
+    convert = "".join(f"    input_{n} = _to_pandas(input_{n}{', ' + repr(info.inputs[n].get('dates')) if info.inputs[n].get('dates') else ''})\n" for n in sorted(info.inputs))
     returned = [f"_to_spark(spark, output_{k})" for k in info.consumed]
     install = ("\nPackages the script installed with Package.installPackages: " + ", ".join(packages) + " - install them on the cluster (%pip install ...).\n") if packages else ""
     banner = (f'"""Embedded Python tool [{info.tool}] of the Alteryx workflow: the ORIGINAL pandas code, unchanged.\n\n'
               "Only the Alteryx plumbing is replaced: Alteryx.read(\"#n\") gives input_n (a pandas copy of the Spark input), Alteryx.write(df, k) sets output_k. The code runs on the DRIVER: the data must fit\n"
               "in its memory (it did in Alteryx, which ran the same code on one machine). Missing values come back to Spark as NULL (pandas NaN in a double column becomes NULL). Compare the result with the\n"
               f'Alteryx output before relying on it. The notebooks call `{name}.run(...)`; edit this file if a cell must change.{install}"""\n')
-    helper = ('def _to_spark(spark, frame):\n    """A pandas result as a Spark DataFrame; NaN in a floating-point column is a missing value, so it becomes NULL."""\n'
+    helper = ('def _to_pandas(frame, dates=()):\n    """A Spark input as Alteryx.read("#n") hands it to the script: Date and DateTime fields are pandas datetime64 (toPandas() alone gives Python\n'
+              '    date objects for a Spark date, and text for a date the workflow carries as text - comparisons and merges on them would then differ)."""\n'
+              "    pdf = frame.toPandas()\n    wanted = {d.lower() for d in dates}\n    for field in frame.schema.fields:\n"
+              "        if isinstance(field.dataType, (T.DateType, T.TimestampType)) or field.name.lower() in wanted:\n"
+              '            pdf[field.name] = pd.to_datetime(pdf[field.name], errors="coerce")\n    return pdf\n\n\n'
+              'def _to_spark(spark, frame):\n    """A pandas result as a Spark DataFrame; NaN in a floating-point column is a missing value, so it becomes NULL."""\n'
               "    sdf = spark.createDataFrame(frame)\n    for field in sdf.schema.fields:\n        if isinstance(field.dataType, (T.DoubleType, T.FloatType)):\n"
               '            sdf = sdf.withColumn(field.name, F.nanvl(F.col("`" + field.name + "`"), F.lit(None).cast(field.dataType)))\n    return sdf\n')
     indented = "\n".join(("    " + ln) if ln.strip() else "" for ln in program.splitlines())
     tail = f"    return {', '.join(returned)}\n" if returned else "    return None\n"
-    result.module = (banner + "from pyspark.sql import functions as F, types as T  # noqa: F401\n\n\n" + helper + "\n\n" + f"def run({params}):\n" + convert + indented + "\n" + tail)
+    result.module = (banner + "import pandas as pd\nfrom pyspark.sql import functions as F, types as T  # noqa: F401\n\n\n" + helper + "\n\n" + f"def run({params}):\n" + convert + indented + "\n" + tail)
     result.module_name = f"utils/{name}.py"
     arguments = ", ".join(["spark"] + ["{in%d}" % info.inputs[n]["index"] for n in sorted(info.inputs)])
     targets = ", ".join("{out_%s}" % info.anchors.get(k, f"Output{k}") for k in info.consumed)

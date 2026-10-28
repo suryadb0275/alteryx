@@ -26,7 +26,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from . import ai, engine, env, interactive, pipeline, sqlsrc, workspace
+from . import ai, autodecide, engine, env, interactive, pipeline, sqlsrc, workspace
 
 OK, FAILED, OPEN = 0, 1, 2
 
@@ -73,15 +73,41 @@ def cmd_convert(args, console: interactive.Console | None = None) -> int:
         wf_catalog, wf_schema = catalog, schema
         sql_options = {"sql_dialect": getattr(args, "sql_dialect", "") or os.environ.get("SQL_DIALECT", ""), "source_catalog": getattr(args, "source_catalog", "") or os.environ.get("SOURCE_CATALOG", ""),
                        "source_schema": getattr(args, "source_schema", "") or os.environ.get("SOURCE_SCHEMA", "")}
-        if asking:
+        ask_all = bool(getattr(args, "ask_all", False))
+
+        def make_client(name):
+            nonlocal ws
+            if ws is None and not os.environ.get("DATABRICKS_TOKEN"):
+                ws = workspace.client(args.profile)
+            return ai.client_from(name, args.base_url or "", sdk=ws, max_output_tokens=args.max_output_tokens)
+        cache = None
+        if asking or not ask_all:
             say(f"Reading {wf.name} (this can take a minute for a large workflow) ...")
             prepared = engine.analyze(wf, Path(tempfile.mkdtemp(prefix="alteryx_migrate_")))
-            plan = interactive.gather(console, prepared[0], prepared[1], args)
+            if not ask_all:                                                        # answers of earlier runs of this file (.alteryx_migrate/answers/)
+                cache = autodecide.AnswerCache(prepared[0].file_name, prepared[0].sha256, autodecide.tool_hashes(prepared[0].workdir))
+                if getattr(args, "forget_answers", False):
+                    cache.forget()
+        if asking:
+            args.saved_decisions = decisions                                       # shown to the user before a saved macro answer is used
+            plan = interactive.gather(console, prepared[0], prepared[1], args, make_client=make_client, cache=cache)
             formats, wf_decisions, model_name = plan.formats, {**decisions, **plan.decisions}, plan.model or model_name
             notes, describe, mode_of = plan.tool_notes, plan.describe, (lambda tool, info: plan.port.get(tool))
             wf_catalog, wf_schema = plan.catalog or catalog, plan.schema or schema
             sql_options = {"sql_dialect": plan.sql_dialect or sql_options["sql_dialect"], "source_catalog": plan.source_catalog or sql_options["source_catalog"],
                            "source_schema": plan.source_schema or sql_options["source_schema"]}
+        elif not ask_all:                                                          # --yes: the rules, the checked high-confidence model answers and earlier answers; nothing is asked
+            client = None
+            if model_name:
+                try:
+                    client = make_client(model_name)
+                except Exception as exc:                                           # noqa: BLE001 - without a model only the rules decide
+                    say(f"note: the model {model_name} cannot be used for the ordering questions ({exc})")
+            new, evidence, decided, _ = autodecide.settle(prepared[0], prepared[1], client, cache, wf_decisions, sql_options["sql_dialect"])
+            if new:
+                wf_decisions = {**wf_decisions, **new, "_auto": {**(wf_decisions.get("_auto") or {}), **evidence}}
+                say(f"Decided {decided} ordering question(s) from the workflow (see the report).")
+            cache.save()
         model = None
         if model_name:
             if ws is None and not os.environ.get("DATABRICKS_TOKEN"):
@@ -141,6 +167,9 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("--yes", action="store_true", help="do not ask questions in the terminal; use the options given and the defaults")
     c.add_argument("--interactive", action="store_true", help="ask the questions even when the input is not a terminal")
     c.add_argument("--port-python", dest="port_python", action="store_true", help="same as --python port")
+    c.add_argument("--ask-all", dest="ask_all", action="store_true", help="ask every question as before: no automatic decisions and no remembered answers")
+    c.add_argument("--forget-answers", dest="forget_answers", action="store_true",
+                   help="ignore and delete the answers remembered for this workflow (.alteryx_migrate/answers/ in the folder you run from)")
     c.set_defaults(fn=cmd_convert)
     m = sub.add_parser("models", help="list the Databricks serving endpoints you can use as --model")
     m.add_argument("--profile", help="Databricks CLI profile (default: environment authentication)")

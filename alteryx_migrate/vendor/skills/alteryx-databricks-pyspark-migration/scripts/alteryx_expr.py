@@ -306,8 +306,9 @@ def cast_code(code: str, dtype: str, ansi: bool = False) -> str:
 
 
 class _Gen:
-    def __init__(self, field_types, current_field, row_ref, df_var="df", ci_default=True, ansi=False):
+    def __init__(self, field_types, current_field, row_ref, df_var="df", ci_default=True, ansi=False, null_as_empty=False):
         self.ci_default_value = ci_default
+        self.null_as_empty = bool(null_as_empty)      # option null_string_as_empty: a NULL text field compares as '' (BUG-16 risk; off by default)
         self.ansi = bool(ansi)
         self.df_var = df_var
         self._concat = {}      # code -> flattened operand list, so a+b+c becomes one F.concat
@@ -403,6 +404,9 @@ class _Gen:
             return f"{self.B(other)}.{'isNull' if op == '==' else 'isNotNull'}()", BOOL
         l, lt = self.gen(n[2])
         r, rt = self.gen(n[3])
+        if self.null_as_empty and op in ("==", "!=") and STRING in (lt, rt):
+            l, r = (f"F.coalesce({x}, F.lit(''))" if xt == STRING and not x.startswith("F.lit(") else x for x, xt in ((l, lt), (r, rt)))
+            self.note("null_string_as_empty is on: a NULL text field compares as the empty string")
         if op == "!=":
             self.note("NOT/!= on nullable values: Spark three-valued logic yields NULL where Alteryx yields a "
                       "Boolean; verify null handling (Filter output coalesces NULL to False).")
@@ -801,18 +805,24 @@ class _Gen:
         return self._dt_part(a, "DateTimeSeconds", "F.second")
 
     def f_datetimetrim(self, a):
+        # The Alteryx help: "Remove unwanted portions of a date-time and return the modified date-time" - every part is a truncation: firstofmonth (the same
+        # as month) and month = midnight of the 1st of the month, year = midnight of 1 January, day = midnight, hour / minute / second = the start of it;
+        # lastofmonth = one second before the end of the month. Its examples return the date-time text ("2016-01-01 00:00:00"); a plural part name
+        # ("months", as in the workflows) is the same part.
         g = self._a(a, 2, "DateTimeTrim")
-        part = str(self._lit(a[1], "DateTimeTrim part")).lower()
+        part = str(self._lit(a[1], "DateTimeTrim part")).strip().lower()
+        if part not in ("firstofmonth", "lastofmonth") and part.endswith("s"):
+            part = part[:-1]
         ts = self._ts(g[0][0])
-        fmt = {"year": "yyyy", "month": "MM", "day": "dd", "hour": "HH", "minute": "mm", "second": "ss"}.get(part)
-        self.review("DateTimeTrim: the returned text for each part (year '2024', month '03', ..., firstofmonth/lastofmonth as 'yyyy-MM-dd') is "
-                    "implemented from the Alteryx help text - confirm with a sample input/output from Alteryx")
-        if fmt:
-            return f"F.date_format({ts}, {fmt!r})", STRING
-        if part == "firstofmonth":
-            return f"F.date_format(F.trunc({ts}, 'month'), 'yyyy-MM-dd')", STRING
+        full = "'yyyy-MM-dd HH:mm:ss'"
+        if part in ("firstofmonth", "month"):
+            return f"F.date_format(F.trunc({ts}, 'month'), {full})", STRING
+        if part == "year":
+            return f"F.date_format(F.trunc({ts}, 'year'), {full})", STRING
+        if part in ("day", "hour", "minute", "second"):
+            return f"F.date_format(F.date_trunc({part!r}, {ts}), {full})", STRING
         if part == "lastofmonth":
-            return f"F.date_format(F.last_day({ts}), 'yyyy-MM-dd')", STRING
+            return f"F.date_format(F.last_day({ts}), 'yyyy-MM-dd 23:59:59')", STRING
         raise TranslationError(f"DateTimeTrim part {part!r} not supported")
 
     def f_datetimeadd(self, a):
@@ -865,18 +875,76 @@ class _Gen:
 # ----------------------------------------------------------------------------- public API
 def translate(expr: str, *, field_types: Optional[dict] = None, current_field: Optional[str] = None,
               row_ref: Optional[Callable[[str, int], str]] = None, df_var: str = "df", ci_default: bool = True,
-              ansi: bool = False) -> Result:
+              ansi: bool = False, null_as_empty: bool = False) -> Result:
     """Translate one Alteryx expression.  Raises TranslationError when it cannot do so reliably."""
-    if expr is None or not str(expr).strip():
-        raise TranslationError("Empty expression")
-    parser = _Parser(str(expr))
-    ast = parser.parse()
-    gen = _Gen(field_types, current_field, row_ref, df_var, ci_default, ansi)
+    if isinstance(expr, Tree):                         # a parse tree built by carry_forward()
+        ast, mixed = expr.node, expr.mixed
+    else:
+        if expr is None or not str(expr).strip():
+            raise TranslationError("Empty expression")
+        parser = _Parser(str(expr))
+        ast, mixed = parser.parse(), parser.mixed_bool_chain
+    gen = _Gen(field_types, current_field, row_ref, df_var, ci_default, ansi, null_as_empty)
     code, typ = gen.gen(ast)
-    if parser.mixed_bool_chain:
+    if mixed:
         gen.review("Unparenthesised mix of AND and OR: Alteryx applies equal precedence left-to-right; "
                    "emitted grouping follows that rule - confirm intent")
     return Result(code=code, type=typ, notes=gen.notes, reviews=gen.reviews, fields=gen.fields, untyped=gen.untyped)
+
+
+@dataclass
+class Tree:
+    """A parsed expression (or a part of one) that translate() accepts in place of the text."""
+    node: tuple
+    mixed: bool = False
+
+
+def _bare(node):
+    while isinstance(node, tuple) and node[0] == "paren":
+        node = node[1]
+    return node
+
+
+def _row_refs(node) -> list:
+    """Every [Row±n:field] in a parse tree, as (field, offset)."""
+    if not isinstance(node, tuple):
+        return [x for item in node for x in _row_refs(item)] if isinstance(node, list) else []
+    if node[0] == "field":
+        return [(node[1], node[2])] if node[2] else []
+    return [x for item in node[1:] for x in _row_refs(item)]
+
+
+def carry_forward(expr: str, field_name: str):
+    """A Multi-Row Formula that updates `field_name` and whose expression is an IF (or IIF) with exactly one result that is [Row-1:field_name], and no other
+    row reference, computes: on a row where that branch is chosen, the value the previous row ended with; on any other row, the rest of the IF.
+    Alteryx evaluates the rows one after another, so a run of 'carry' rows repeats the value of the last row before them that was not one.
+    Returns (carry, value) as Trees - carry: the condition under which the [Row-1:f] branch is chosen, written as an IF so that a NULL condition falls through
+    exactly as in the original; value: the IF without that branch - or None when the expression has another shape."""
+    parser = _Parser(str(expr))
+    tree = _bare(parser.parse())
+    if tree[0] == "call" and str(tree[1]).upper() == "IIF" and len(tree[2]) == 3:
+        tree = ("if", [(tree[2][0], tree[2][1])], tree[2][2])
+    if tree[0] != "if":
+        return None
+
+    def prev(node):
+        node = _bare(node)
+        return node is not None and node[0] == "field" and node[2] == -1 and node[1].strip().lower() == field_name.strip().lower()
+    branches, otherwise = tree[1], tree[2]
+    at = [i for i, (_, then) in enumerate(branches) if prev(then)]
+    last = otherwise is not None and prev(otherwise)
+    if len(at) + last != 1 or len(_row_refs(tree)) != 1:
+        return None
+    no, yes = ("bool_lit", False), ("bool_lit", True)
+    if at:
+        k = at[0]
+        carry = ("if", [(c, no) for c, _ in branches[:k]] + [(branches[k][0], yes)], no)
+        rest = branches[:k] + branches[k + 1:]
+        value = ("if", rest, otherwise) if rest else (otherwise if otherwise is not None else ("call", "Null", []))
+    else:
+        carry = ("if", [(c, no) for c, _ in branches], yes)
+        value = ("if", branches, None)
+    return Tree(carry, parser.mixed_bool_chain), Tree(value, parser.mixed_bool_chain)
 
 
 def referenced_fields(expr: str) -> list:

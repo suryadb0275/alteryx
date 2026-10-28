@@ -289,12 +289,12 @@ def bronze_notebook(inputs: dict, bronze_info: dict, bronze_sql: dict) -> str:
 # ---------------------------------------------------------------- notebooks
 def build_notebooks(title: str, chunks: list, codes: dict, statuses: dict, inputs: dict, outputs: dict, bronze_info: dict, attention: list,
                     decisions: list | None = None, allow_overwrite: bool = False, asked: dict | None = None, details: dict | None = None, ai: dict | None = None,
-                    bronze_sql: dict | None = None) -> dict:
+                    bronze_sql: dict | None = None, review: str = "") -> dict:
     """-> {file name: ipynb text}. Only the stages that have content are written."""
     files, shown, seen = {}, {}, {}
     files["00_config.ipynb"] = ipynb([
         md(f"# Config - {title}\n\n{BANNER}\n\nTable names for all notebooks. Run the notebooks in order: `01_bronze`, `02_silver`, `03_gold`.\n\n"
-           f"## Tools that need your update\n\n{attention_table(attention)}" + decisions_md(decisions)),
+           f"## Tools that need your update\n\n{attention_table(attention)}" + decisions_md(decisions) + (f"\n\n{review}" if review else "")),
         code(config_code(inputs, outputs, allow_overwrite))])
     files["01_bronze.ipynb"] = bronze_notebook(inputs, bronze_info, bronze_sql or {})
     for layer, fname in LAYER_FILE.items():
@@ -302,10 +302,12 @@ def build_notebooks(title: str, chunks: list, codes: dict, statuses: dict, input
         if not mine:
             continue
         need = [u for u in attention if u["notebook"] == fname]
+        # a '+' whose operand types are not known checks the column type at run time with StringType
+        imports = IMPORTS + ("\nfrom pyspark.sql.types import StringType" if any("StringType" in codes.get(c["id"], "") for c in mine) else "")
         cells = [md(f"# {layer.capitalize()} - {'business-ready outputs' if layer == 'gold' else 'cleansed and integrated tables'}\n\n"
                     f"One section per Alteryx container; one commented block per tool (`# [id] Kind`). Run top to bottom.\n\n"
                     f"## Tools that need your update in this notebook\n\n{attention_table(need)}"),
-                 code("%run ./00_config"), code(IMPORTS)]
+                 code("%run ./00_config"), code(imports)]
         sources = sorted({k for c in mine if c["strategy"] == "template" for k in c.get("sources", [])})
         if sources:
             cells += [md("### Sources\nInput tables, read as they are."), code("\n".join(f"{k} = spark.table(INPUTS[{k!r}])" for k in sources))]
@@ -321,7 +323,7 @@ def build_notebooks(title: str, chunks: list, codes: dict, statuses: dict, input
     return files
 
 
-def report(meta: dict, chunks: list, statuses: dict, stats: dict, attention: list, versions: dict, decisions: list | None = None, ai: dict | None = None) -> str:
+def report(meta: dict, chunks: list, statuses: dict, stats: dict, attention: list, versions: dict, decisions: list | None = None, ai: dict | None = None, review: str = "") -> str:
     done = sum(1 for c in chunks if statuses.get(c["id"]) in ("ok", "accepted"))
     lines = [f"# Conversion report - {meta.get('file_name')}", "",
              "**Status: converted, not yet validated.** Nothing was compared with real Alteryx output.", "",
@@ -340,6 +342,8 @@ def report(meta: dict, chunks: list, statuses: dict, stats: dict, attention: lis
     lines += ["", "## Tools that need your update", "", attention_table(attention)]
     if decisions:
         lines += ["", "## Decisions applied in this conversion", ""] + [f"- {d}" for d in decisions]
+    if review:
+        lines += ["", review]
     return "\n".join(lines) + "\n"
 
 

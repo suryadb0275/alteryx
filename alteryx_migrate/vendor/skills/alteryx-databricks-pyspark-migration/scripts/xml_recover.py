@@ -50,24 +50,43 @@ def load(path):
 
 
 # ----------------------------------------------------------------------------- per-kind extractors -> IR fields
+def _select_op(f, keep_same=False):
+    """keep_same: a Join writes rename="Right_X" on field Right_X to say that the output keeps the prefixed name (the plain name collided)."""
+    op = {"field_name": f.get("field"), "selected": f.get("selected", "True") == "True"}
+    if f.get("rename") and (keep_same or f.get("rename") != f.get("field")):
+        op["rename_to"] = f.get("rename")
+    if f.get("type"):
+        op["new_type"], op["new_size"] = f.get("type"), f.get("size")
+    return op
+
+
 def _join(cfg):
     infos = {ji.get("connection"): _fields(ji) for ji in cfg.findall("JoinInfo")}
     left, right = infos.get("Left", []), infos.get("Right", [])
-    return {"join_keys": [{"left_field": a, "right_field": b} for a, b in zip(left, right)],
-            "join_by_position": cfg.get("joinByRecordPos") == "True"}
+    out = {"join_keys": [{"left_field": a, "right_field": b} for a, b in zip(left, right)],
+           "join_by_position": cfg.get("joinByRecordPos") == "True"}
+    # the Join output's field list: every field is written Left_<name> / Right_<name> with input="Left_" | "Right_"; '*Unknown' (no input) applies to
+    # both sides; the type/size attributes are a retype. The parser drops '*Unknown' and the retype, so the XML list replaces its own.
+    confs = cfg.findall("SelectConfiguration/Configuration")
+    conf = next((c for c in confs if (c.get("outputConnection") or "").lower() == "join"), confs[0] if confs else None)
+    sel = conf.find("SelectFields") if conf is not None else None
+    if sel is not None:
+        sides = {"Left": [], "Right": []}
+        for f in sel.findall("SelectField"):
+            side = (f.get("input") or "").rstrip("_")
+            if f.get("field") == "*Unknown":
+                for ops in sides.values():
+                    ops.append(_select_op(f))
+            elif side in sides:
+                sides[side].append(_select_op(f, keep_same=True))
+        out["select_left"], out["select_right"] = sides["Left"], sides["Right"]
+    return out
 
 
 def _joinmulti(cfg):
     jf = cfg.find("JoinFields")
     sel = cfg.find("SelectConfiguration/Configuration/SelectFields")
-    ops = []
-    for f in (sel.findall("SelectField") if sel is not None else []):
-        op = {"field_name": f.get("field"), "selected": f.get("selected", "True") == "True"}
-        if f.get("rename") and f.get("rename") != f.get("field"):
-            op["rename_to"] = f.get("rename")
-        if f.get("type"):
-            op["new_type"], op["new_size"] = f.get("type"), f.get("size")
-        ops.append(op)
+    ops = [_select_op(f) for f in (sel.findall("SelectField") if sel is not None else [])]
     return {"join_inputs": {ji.get("connection"): _fields(ji) for ji in jf.findall("JoinInfo")} if jf is not None else {},
             "join_by_position": _value(cfg, "JoinByRecPos") == "True",
             "select_ops": ops, "output_join_only": _value(cfg, "OutputJoinOnly") == "True", "cartesian_mode": _text(cfg, "CartesianMode") or "Error"}
@@ -123,15 +142,51 @@ def _generaterows(cfg):
             "expr_cond": _text(cfg, "Expression_Cond"), "expr_loop": _text(cfg, "Expression_Loop")}
 
 
+def _sample(cfg):
+    groups = cfg.find("GroupFields")
+    n = _text(cfg, "N")
+    return {"sample_method": _text(cfg, "Mode").lower(), "n_records": int(n) if n.isdigit() else None,
+            "group_fields": [f.get("name") or f.get("field") for f in groups.findall("Field")] if groups is not None else []}
+
+
+def _findreplace(cfg):
+    append = cfg.find("ReplaceAppendFields")
+    return {"fr_within": _text(cfg, "FieldFind"), "fr_find": _text(cfg, "FieldSearch"), "fr_replace_with": _text(cfg, "ReplaceFoundField"),
+            "fr_mode": _text(cfg, "FindMode"), "fr_nocase": _value(cfg, "NoCase") == "True", "fr_whole_word": _value(cfg, "MatchWholeWord") == "True",
+            "fr_replace_mode": _text(cfg, "ReplaceMode"), "fr_multiple": _value(cfg, "ReplaceMultipleFound") == "True",
+            "fr_append_fields": _fields(append)}
+
+
 def _formula(cfg):
     ff = cfg.findall("FormulaFields/FormulaField")
     return {"formulas": [{"output_field": f.get("field"), "expression": f.get("expression"), "data_type": f.get("type"),
                           "size": f.get("size")} for f in ff], "passthrough": not ff}
 
 
+def _text2cols(cfg):
+    # Alteryx writes the delimiters as <Delimeters value="..."/> (its own spelling); the parser looks for 'Delimiter' and falls back to ',' -
+    # so the XML value always replaces the parsed one, and a missing value stays missing (the emitter then asks instead of assuming ',').
+    delim = cfg.find("Delimeters")
+    if delim is None:
+        delim = cfg.find("Delimiters")
+    rows = cfg.find("SplitToRows")
+    return {"delimiter": delim.get("value") if delim is not None else None, "split_to": "rows" if rows is not None and rows.get("value") == "True" else "columns",
+            "field_name": _text(cfg, "Field"), "output_root_name": _text(cfg, "RootName"), "extra_parts": _text(cfg, "ErrorHandling") or None,
+            "split_flags": _value(cfg, "Flags")}
+
+
+def _filter(cfg):
+    # Simple mode (Field, Operator, Operand) - the operand is text typed into the tool; whether it is a number or a string depends on the field's type
+    if _text(cfg, "Mode") != "Simple" or cfg.find("Simple") is None:
+        return {}
+    simple = cfg.find("Simple")
+    return {"simple": {"field": _text(simple, "Field"), "operator": _text(simple, "Operator"), "operand": _text(simple, "Operands/Operand")}}
+
+
 EXTRACT = {"JoinNode": _join, "JoinMultipleNode": _joinmulti, "CrossTabNode": _crosstab, "RunningTotalNode": _runningtotal,
            "TransposeNode": _transpose, "MultiRowFormulaNode": _multirow, "DynamicRenameNode": _dynrename,
-           "DateTimeNode": _datetime, "GenerateRowsNode": _generaterows, "FormulaNode": _formula}
+           "DateTimeNode": _datetime, "GenerateRowsNode": _generaterows, "FormulaNode": _formula, "SampleNode": _sample, "FindReplaceNode": _findreplace,
+           "TextToColumnsNode": _text2cols, "FilterNode": _filter}
 # IR values that are known to be unreliable even when present: always replaced by the XML value
 ALWAYS = {"TransposeNode": ("key_fields", "data_fields"), "MultiRowFormulaNode": ("output_field",),
           "CrossTabNode": ("aggregation",)}
@@ -162,7 +217,8 @@ def apply(wf, path):
             if (empty and val not in (None, "", [], {})) or (key in ALWAYS.get(node["node_type"], ()) and val != cur) \
                     or key in ("update_field", "join_by_position", "data_unknown", "data_skip", "passthrough", "methods",
                                "is_from", "other_rows", "unknown_renamed", "fields_kept", "join_inputs", "expr_init",
-                               "expr_cond", "expr_loop"):
+                               "expr_cond", "expr_loop", "sample_method", "n_records", "group_fields", "select_left", "select_right",
+                               "delimiter", "split_to", "extra_parts", "split_flags", "simple") or key.startswith("fr_"):
                 if cur != val:
                     node[key] = val
                     changed.append(key)

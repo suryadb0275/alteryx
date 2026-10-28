@@ -13,7 +13,7 @@ ready-to-review **PySpark** and **Spark SQL** notebooks (Bronze / Silver / Gold)
 4. [Run it from your computer](#a-from-your-computer)
 5. [Deploy to your workspace with a bundle (DAB)](#b-deploy-to-your-workspace-with-a-bundle-dab)
 6. [What you get](#what-you-get)
-7. [The questions it asks](#the-questions-it-asks)
+7. [The questions it asks](#the-questions-it-asks) and [Fewer questions](#fewer-questions)
 8. [Options](#options)
 9. [SQL inside the input tools](#sql-inside-the-input-tools), [Python code](#python-pandas-code-is-a-component-file), [AI models](#ai-models-optional-any-databricks-model)
 10. [Development](#development)
@@ -183,14 +183,32 @@ Every Alteryx tool is documented (what it does, its settings, the PySpark and Sp
 
 In a terminal it first reads the workflow, then asks. Press Enter to accept the answer in [brackets]; `--yes` skips all questions.
 
-1. **Which code do you need?** PySpark, Spark SQL, or both.
-2. **Which catalog and schema** hold the tables (Enter = none: names are not qualified and the notebooks use the catalog and schema that are current when they run).
-3. **Where are the source tables** of the SQL inside input tools, and which database dialect it is.
-4. **A macro without a definition?** Say in English what it does (or give the `.yxmc` path).
-5. **Which row does a Unique tool keep?** Any, or sorted by fields you name.
-6. **An embedded Python script?** Keep the pandas code in a util file, port it to PySpark with a model, or leave it.
-7. **Any other tool without a converter:** what must it do here?
-8. **Which Databricks model** may write what the rules cannot (Enter = none).
+1. **Which Databricks model** may help (Enter = none). Asked first, and only when something could use it (`--model` or `MODEL` in `.env` skips it).
+2. **Which code do you need?** PySpark, Spark SQL, or both.
+3. **Which catalog and schema** hold the tables (Enter = none: names are not qualified and the notebooks use the catalog and schema that are current when they run).
+4. **Where are the source tables** of the SQL inside input tools, and which database dialect it is.
+5. **A macro without a definition?** Say what it does: it only reads data (offered only when nothing flows into it), or describe it (or give the `.yxmc` path).
+6. **The order of the records**, for a Unique, Sample, Multi-Row Formula, Running Total or Record ID with nothing upstream that sorts - only the ones the converter could not settle itself (see below).
+7. **Field types** Spark SQL needs, and **which tool feeds each Join Multiple input**, when the workflow does not say.
+8. **An embedded Python script?** Keep the pandas code in a util file, port it to PySpark with a model, or leave it.
+9. **A tool the skills do not cover:** what must it do here? (A tool the skills describe is left to the model, from its settings, without a question.)
+
+## Fewer questions
+
+The converter answers the routine questions itself, and says so in `conversion_report.md` under **Decisions made for you (please review)** - each with its source,
+confidence, evidence and the `--decisions` line that overrides it.
+
+- **Automatic, from the workflow (rules):** the record order when the input query ends with `ORDER BY` and every tool on the way keeps that order and those fields;
+  "any record" for a Unique whose every following tool uses only its key fields, or whose key fields are every field it receives.
+- **Automatic, from the model (when one is configured):** it sees the tool's settings, its neighbours, the source query and the skill's recipe, and proposes an order.
+  The converter checks it: every field must appear in the settings of the tool, the tools before it or the source; an order made only of the group / key fields is
+  refused; "any record" only for a Unique or Sample. **High** confidence is applied (and listed for review); **medium** is asked with the proposal as the default
+  (press Enter); low, invalid or an error is asked as before. Nothing is applied below high confidence, and `--yes` never invents an order.
+- **Still asked:** macros without a definition, tools the skills do not cover, the embedded Python choice, code type, catalog and schema, the SQL dialect, Join
+  Multiple inputs, field types for SQL, and every order the rules and the model could not settle.
+- **Remembered answers:** your answers are kept in `.alteryx_migrate/answers/<workflow>.json` in the folder you run from (`ALTERYX_ANSWERS_DIR` changes it), one
+  per tool with a hash of its settings: a re-run asks nothing you already answered, and a tool you changed is asked again. Automatic decisions are worked out again
+  on every run (they rest on other tools too). `--forget-answers` deletes the file; `--ask-all` asks every question as before (no automatic decisions, no memory).
 
 ## Options
 
@@ -205,7 +223,9 @@ In a terminal it first reads the workflow, then asks. Press Enter to accept the 
 | `--python keep\|port\|none` | what to do with an embedded Python tool |
 | `--model <endpoint>` | a Databricks-served model for the gaps (see below) |
 | `--sql-dialect`, `--source-catalog`, `--source-schema` | for the SQL inside input tools |
-| `--yes` / `--interactive` | never ask / ask even without a terminal |
+| `--yes` / `--interactive` | never ask / ask even without a terminal (`--yes` still applies the rules, the checked high-confidence model answers and remembered answers) |
+| `--ask-all` | ask every question as before: no automatic decisions, no remembered answers |
+| `--forget-answers` | delete the answers remembered for the workflow and ask again |
 
 `python -m alteryx_migrate models` lists the models you can use.
 

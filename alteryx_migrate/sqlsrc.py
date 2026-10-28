@@ -14,6 +14,7 @@ import logging
 
 import sqlglot
 from sqlglot import exp
+from sqlglot.dialects.spark import Spark
 
 
 class _Collect(logging.Handler):
@@ -83,6 +84,89 @@ def projection_columns(select: exp.Expression) -> list | None:
     return names
 
 
+class _SparkKeepRecursive(Spark):
+    """Spark SQL as sqlglot writes it, except that WITH RECURSIVE is kept: sqlglot's Spark dialect drops the keyword (older Spark had no recursive CTEs),
+    which leaves a CTE that reads itself - an error. Databricks runs recursive CTEs from Databricks Runtime 17.0."""
+
+    class Generator(Spark.Generator):
+        TRANSFORMS = {k: v for k, v in Spark.Generator.TRANSFORMS.items() if k is not exp.With}
+
+
+def _final_select(tree: exp.Expression):
+    """The SELECT that produces the query's result columns (the first branch of a UNION, the body after WITH)."""
+    node = tree
+    while True:
+        if isinstance(node, exp.Subquery):
+            node = node.this
+        elif isinstance(node, (exp.Union, exp.Intersect, exp.Except)):
+            node = node.this
+        else:
+            return node if isinstance(node, exp.Select) else None
+
+
+def _bigquery_names(tree: exp.Expression, notes: list) -> exp.Expression:
+    """BigQuery's own names for the result columns, which the tools after the input use: an expression without an alias is named f0_, f1_, ... (counting
+    only the unnamed ones), and a name that occurs again is renamed <name>_1, <name>_2 ... Spark would pick other names (or refuse the duplicate), so
+    both are written as aliases."""
+    select = _final_select(tree)
+    if select is None:
+        return tree
+    unnamed, items, seen = 0, [], {}
+    for item in select.expressions:
+        if isinstance(item, exp.Star) or (isinstance(item, exp.Column) and isinstance(item.this, exp.Star)):
+            star_cols = _star_columns(select, item)
+            if star_cols is None:                                    # a table's star: its columns are not known here
+                items.append(item)
+                continue
+            if any(c.lower() in seen for c in star_cols):           # a duplicate inside the star: list its columns so the later one can be renamed
+                qualifier = item.table if isinstance(item, exp.Column) else ""
+                for c in star_cols:
+                    items.append(_renamed(exp.column(c, table=qualifier or None), c, seen, notes))
+            else:
+                for c in star_cols:
+                    seen[c.lower()] = 0
+                items.append(item)
+            continue
+        if isinstance(item, exp.Alias):
+            name = item.alias
+        elif isinstance(item, (exp.Column, exp.Dot)):
+            name = item.name
+        else:
+            name = f"f{unnamed}_"
+            unnamed += 1
+            notes.append(f"the unnamed result column {item.sql(dialect='bigquery')[:60]} is named {name}, as BigQuery names it (the tools after the input use that name)")
+            item = exp.alias_(item, name)
+        items.append(_renamed(item, name, seen, notes))
+    select.set("expressions", items)
+    return tree
+
+
+def _renamed(item, name, seen, notes):
+    key = name.lower()
+    if key not in seen:
+        seen[key] = 0
+        return item
+    seen[key] += 1
+    new = f"{name}_{seen[key]}"
+    while new.lower() in seen:
+        seen[key] += 1
+        new = f"{name}_{seen[key]}"
+    seen[new.lower()] = 0
+    notes.append(f"the result column {name} occurs again: the later one is named {new}, as BigQuery names it")
+    return exp.alias_(item.this if isinstance(item, exp.Alias) else item, new)
+
+
+def _star_columns(select: exp.Select, item) -> list | None:
+    """The columns a star in `select` stands for, when it reads a sub-select whose columns are listed; else None."""
+    sources = [select.args["from"].this] if select.args.get("from") else []
+    sources += [j.this for j in select.args.get("joins") or []]
+    qualifier = item.table if isinstance(item, exp.Column) else ""
+    inner = [s for s in sources if isinstance(s, exp.Subquery) and (not qualifier or s.alias == qualifier)]
+    if (len(sources) != 1 and not qualifier) or len(inner) != 1:
+        return None
+    return projection_columns(inner[0])
+
+
 def _fix_types(tree: exp.Expression, dialect: str, notes: list) -> exp.Expression:
     """A DECIMAL without precision means something different in each engine; Spark's default (10,0) would silently cut the fraction."""
     default = {"bigquery": (38, 9), "tsql": (18, 0), "oracle": (38, 0), "postgres": None, "mysql": (10, 0), "snowflake": (38, 0)}.get(dialect)
@@ -142,13 +226,20 @@ def translate(query: str, dialect: str, mapper) -> Translation:
         out.error = "no Databricks table is known for: " + ", ".join(sorted(set(missing)))
         return out
     tree = _fix_types(tree, dialect, out.notes)
-    logger = logging.getLogger("sqlglot")                                       # sqlglot warns on stderr for what Spark SQL cannot express (e.g. recursive CTEs): keep it with the query
+    if dialect == "bigquery":
+        tree = _bigquery_names(tree, out.notes)
+        out.columns = projection_columns(tree)
+    recursive = any(w.args.get("recursive") for w in tree.find_all(exp.With))
+    logger = logging.getLogger("sqlglot")                                       # sqlglot warns on stderr for what Spark SQL cannot express: keep it with the query
     collected = _Collect()
     logger.addHandler(collected)
     try:
-        out.sql = tree.sql(dialect="spark", pretty=True)
+        out.sql = tree.sql(dialect=_SparkKeepRecursive if recursive else "spark", pretty=True)
     finally:
         logger.removeHandler(collected)
+    if recursive:
+        out.notes.append("WITH RECURSIVE is kept: Databricks runs recursive CTEs from Databricks Runtime 17.0 (older runtimes reject the view); "
+                         "check the recursion depth limit against the data")
     out.notes += [f"sqlglot: {m} - review this query by hand" for m in dict.fromkeys(collected.messages)]
     out.tables = seen
     if dialect != "spark":

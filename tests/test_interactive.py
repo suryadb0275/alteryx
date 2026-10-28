@@ -33,11 +33,11 @@ def cells(path):
 
 
 def test_the_converter_asks_which_code_where_and_which_row_then_converts(tmp_path):
-    script = Script("1", "main", "s", "", "", "1")          # PySpark only; catalog main; schema s; source tables: same catalog, dataset as schema; Unique: any record
+    script = Script("", "1", "main", "s", "", "", "1")      # model: none; PySpark only; catalog main; schema s; source tables: same catalog, dataset as schema; Unique: any record
     code = run([str(FIXTURES / "unique_flow.yxmd"), "--out", str(tmp_path)], script)
     assert code == cli.OK and not script.answers
     asked = "\n".join(script.prompts + script.lines)
-    assert "Which code do you need?" in asked and "Which catalog holds the tables" in asked and "which one is first" in asked and "In which Databricks catalog are those source tables?" in asked
+    assert "Which code do you need?" in asked and "Which catalog holds the tables" in asked and "in which order the rows come" in asked and "In which Databricks catalog are those source tables?" in asked
     assert (tmp_path / "unique_flow" / "03_gold.ipynb").exists() and not (tmp_path / "unique_flow" / "03_gold_sql.ipynb").exists()                    # only the code that was asked for
     assert "CREATE OR REPLACE VIEW" in cells(tmp_path / "unique_flow" / "01_bronze.ipynb") and "main.sap_data.Customer_Master_V" in cells(tmp_path / "unique_flow" / "01_bronze.ipynb")
     assert "main.s.bronze_customer_master_v" in cells(tmp_path / "unique_flow" / "00_config.ipynb") and "dropDuplicates" in cells(tmp_path / "unique_flow" / "03_gold.ipynb")
@@ -54,7 +54,7 @@ def test_a_tool_without_a_converter_is_described_in_english_and_the_words_reach_
             return "```python\ndf = spark.table(INPUTS['bronze_customer_master_v']).limit(10)\nwrite_output(df, 'gold_customer_master_v_selected')\n```"
     monkeypatch.setattr(ai, "client_from", lambda *a, **k: Writer())
     script = Script("3", "", "", "", "keep only the first ten rows of each customer", "fake-model")      # both codes; no catalog; the Sample tool; the model
-    run([str(FIXTURES / "sample_flow.yxmd"), "--out", str(tmp_path)], script)
+    run([str(FIXTURES / "sample_flow.yxmd"), "--out", str(tmp_path), "--ask-all"], script)              # the skills describe Sample: only --ask-all asks about it
     assert "What should this tool do in this workflow?" in "\n".join(script.prompts)
     assert prompts and "keep only the first ten rows of each customer" in prompts[0] and "what_the_user_says_each_tool_must_do" in prompts[0]
     gold = cells(tmp_path / "sample_flow" / "03_gold.ipynb")
@@ -63,7 +63,7 @@ def test_a_tool_without_a_converter_is_described_in_english_and_the_words_reach_
 
 def test_without_a_model_the_words_stay_in_the_hand_off_for_a_person_or_another_ai(tmp_path):
     script = Script("1", "", "", "", "keep only the first ten rows of each customer", "")                 # no model
-    run([str(FIXTURES / "sample_flow.yxmd"), "--out", str(tmp_path)], script)
+    run([str(FIXTURES / "sample_flow.yxmd"), "--out", str(tmp_path), "--ask-all"], script)
     gold = cells(tmp_path / "sample_flow" / "03_gold.ipynb")
     assert "UPDATE REQUIRED - tool [20] Sample" in gold and "What the user asked for:" in gold and "keep only the first ten rows of each customer" in gold
 
@@ -71,7 +71,7 @@ def test_without_a_model_the_words_stay_in_the_hand_off_for_a_person_or_another_
 def test_an_embedded_python_script_is_ported_after_the_user_agrees_and_describes_it(tmp_path, monkeypatch):
     fake = FakeModel(question=True)
     monkeypatch.setattr(ai, "client_from", lambda *a, **k: fake)
-    script = Script("3", "", "", "", "2", "sales are doubled", "fake-model", "2")                        # both; no catalog; python: option 2 (port with the model); description; model; the model's question: option 2
+    script = Script("fake-model", "3", "", "", "", "2", "sales are doubled", "2")                        # model first; both; no catalog; python: option 2 (port with the model); description; the model's question: option 2
     code = run([str(FIXTURES / "python_flow.yxmd"), "--out", str(tmp_path)], script)
     text = "\n".join(script.prompts + script.lines)
     assert "What should I do with it?" in text and "Keep the pandas code as it is" in text and "Should the threshold 10 be inclusive" in text
@@ -95,7 +95,7 @@ def test_a_missing_macro_is_asked_about_and_its_description_goes_to_the_tool():
     analysis = SimpleNamespace(file_name="w.yxmd", tool_count=3, chunks=[], macros_missing=["cleanse.yxmc"], inputs={},
                                unsupported=[{"id": 5, "name": "Macro", "plugin": "macro:cleanse.yxmc", "container": "c", "status": "cannot be converted", "reason": "No converter for tool type: Macro", "decision": "",
                                              "after": "[1]", "before": "[2]"}])
-    script = Script("3", "main", "s", "it trims text and upper-cases the Name column", "")        # code; catalog; schema; macro description; model: none
+    script = Script("", "3", "main", "s", "2", "it trims text and upper-cases the Name column")   # model: none; code; catalog; schema; the macro changes data; its description
     args = SimpleNamespace(format=None, catalog="", schema="", model=None)
     plan = interactive.gather(script.console(), analysis, {}, args)
     assert plan.tool_notes == {5: "it trims text and upper-cases the Name column"} and "The workflow uses the macro 'cleanse.yxmc'" in "\n".join(script.lines)
@@ -103,7 +103,7 @@ def test_a_missing_macro_is_asked_about_and_its_description_goes_to_the_tool():
 
 
 def test_the_original_pandas_code_is_kept_in_a_component_file_without_any_model(tmp_path):
-    script = Script("3", "", "", "", "1")                                      # both; no catalog; python: option 1 (keep the pandas code)
+    script = Script("", "3", "", "", "", "1")                                  # model: none; both; no catalog; python: option 1 (keep the pandas code)
     code = run([str(FIXTURES / "python_flow.yxmd"), "--out", str(tmp_path)], script)
     assert not script.answers and code in (cli.OK, cli.OPEN)
     component = (tmp_path / "python_flow" / "utils" / "python_tool_17.py").read_text(encoding="utf-8")

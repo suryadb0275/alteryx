@@ -43,7 +43,7 @@
       </GuiSettings>
       <Properties>
         <Configuration>
-          <Mode>First</Mode>
+          <Mode>Random</Mode>
           <N>10</N>
           <GroupFields orderChanged="False" />
         </Configuration>

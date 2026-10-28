@@ -68,3 +68,10 @@ def test_an_unclear_join_multiple_input_is_asked_and_the_answer_applies(tmp_path
     script = Script("2", "main", "s", "", "", str(first), "1")           # PySpark; catalog; schema; source catalog / schema; #1 from tool [1]; #3 from the one left
     assert run([str(flow), "--out", str(tmp_path / "out")], script) == cli.OK and not script.answers
     assert any("Which tool feeds input #1?" in p for p in script.prompts + script.lines)
+
+
+def test_an_imputation_with_no_field_selected_passes_the_records_through(tmp_path):
+    flow = tmp_path / "impute_none.yxmd"
+    flow.write_text(IMPUTE.read_text(encoding="utf-8").replace('"Price","Qty"', '""'), encoding="utf-8")
+    result = pipeline.convert_workflow(flow, tmp_path / "out", "main", "s")
+    assert result.unsupported == [] and "F.when(" not in cells(tmp_path / "out" / "03_gold.ipynb")

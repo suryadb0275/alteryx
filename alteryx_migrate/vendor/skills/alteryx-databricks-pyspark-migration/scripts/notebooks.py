@@ -415,7 +415,7 @@ def generate(wf, plan, outdir, opts=None, test_results=None):
     ext = "." + fmt
     answers = opts.get("answers") or {}
     project = PF.project_settings(answers)
-    options = {"text_match_case_insensitive": project["text_match_case_insensitive"], "ansi": project.get("ansi"), "null_safe_join": project.get("null_safe_join"),
+    options = {"text_match_case_insensitive": project["text_match_case_insensitive"], "ansi": project.get("ansi"), "null_safe_join": project.get("null_safe_join"), "null_string_as_empty": project.get("null_string_as_empty"),
                "field_types": {str(k).lower(): str(v).lower() for k, v in (answers.get("field_types") or {}).items()},
                "join_inputs": dict(answers.get("join_inputs") or {})}
     os.makedirs(outdir, exist_ok=True)

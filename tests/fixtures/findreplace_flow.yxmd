@@ -1,0 +1,103 @@
+<?xml version="1.0"?>
+<AlteryxDocument yxmdVer="2021.3">
+  <Nodes>
+    <Node ToolID="1">
+      <GuiSettings Plugin="big_query_input_v3.0.0">
+        <Position x="100" y="100" />
+      </GuiSettings>
+      <Properties>
+        <Configuration>
+          <authType>ServicePrincipal</authType>
+          <usingCustomFilter>True</usingCustomFilter>
+          <inputCustomFilter>select K, A from sap_data.Left_Table</inputCustomFilter>
+          <customFilterProjectId>demo-project</customFilterProjectId>
+          <sqlType>STANDARD_SQL</sqlType>
+        </Configuration>
+        <Annotation DisplayMode="0">
+          <Name />
+          <DefaultAnnotationText />
+          <Left value="False" />
+        </Annotation>
+        <MetaInfo connection="Output">
+          <RecordInfo>
+            <Field name="K" source="BigQuery" type="V_WString" size="255" />
+            <Field name="A" source="BigQuery" type="Double" size="8" />
+          </RecordInfo>
+        </MetaInfo>
+      </Properties>
+      <EngineSettings Macro="BigQuery\big_query_input.yxmc" EngineDll="Macro" EngineDllEntryPoint="BigQuery\big_query_input.yxmc" />
+    </Node>
+    <Node ToolID="2">
+      <GuiSettings Plugin="big_query_input_v3.0.0">
+        <Position x="100" y="200" />
+      </GuiSettings>
+      <Properties>
+        <Configuration>
+          <authType>ServicePrincipal</authType>
+          <usingCustomFilter>True</usingCustomFilter>
+          <inputCustomFilter>select K, B from sap_data.Right_Table</inputCustomFilter>
+          <customFilterProjectId>demo-project</customFilterProjectId>
+          <sqlType>STANDARD_SQL</sqlType>
+        </Configuration>
+        <Annotation DisplayMode="0">
+          <Name />
+          <DefaultAnnotationText />
+          <Left value="False" />
+        </Annotation>
+        <MetaInfo connection="Output">
+          <RecordInfo>
+            <Field name="K" source="BigQuery" type="V_WString" size="255" />
+            <Field name="B" source="BigQuery" type="Double" size="8" />
+          </RecordInfo>
+        </MetaInfo>
+      </Properties>
+      <EngineSettings Macro="BigQuery\big_query_input.yxmc" EngineDll="Macro" EngineDllEntryPoint="BigQuery\big_query_input.yxmc" />
+    </Node>
+    <Node ToolID="3">
+      <GuiSettings Plugin="AlteryxBasePluginsGui.FindReplace.FindReplace">
+        <Position x="300" y="150" />
+      </GuiSettings>
+      <Properties>
+        <Configuration>
+          <FieldFind>K</FieldFind>
+          <FieldSearch>K</FieldSearch>
+          <ReplaceFoundField>K</ReplaceFoundField>
+          <FindMode>FindAny</FindMode>
+          <NoCase value="False" />
+          <MatchWholeWord value="False" />
+          <ReplaceMode>Append</ReplaceMode>
+          <ReplaceMultipleFound value="False" />
+          <ReplaceAppendFields>
+            <Field field="B" />
+          </ReplaceAppendFields>
+        </Configuration>
+        <Annotation DisplayMode="0">
+          <Name />
+          <DefaultAnnotationText />
+          <Left value="False" />
+        </Annotation>
+      </Properties>
+      <EngineSettings EngineDll="AlteryxBasePluginsEngine.dll" EngineDllEntryPoint="AlteryxFindReplace" />
+    </Node>
+  </Nodes>
+  <Connections>
+    <Connection>
+      <Origin ToolID="2" Connection="Output" />
+      <Destination ToolID="3" Connection="Source" />
+    </Connection>
+    <Connection>
+      <Origin ToolID="1" Connection="Output" />
+      <Destination ToolID="3" Connection="Targets" />
+    </Connection>
+  </Connections>
+  <Properties>
+    <Memory default="True" />
+    <GlobalRecordLimit value="0" />
+    <TempFiles default="True" />
+    <Annotation on="True" includeToolName="False" />
+    <ConvertTimes value="False" />
+    <ErrorWarningOptions>
+      <ErrorLimit value="1000" />
+    </ErrorWarningOptions>
+  </Properties>
+</AlteryxDocument>

@@ -53,8 +53,11 @@ class NodeCode:
     reviews: list = field(default_factory=list)
     outputs: dict = field(default_factory=dict)     # anchor -> variable name
     orig: list = field(default_factory=list)        # original Alteryx expressions, shown only for tools needing review
+    block_reason: str = ""                          # the message that blocked the tool (a review note may come before it)
 
     def need(self, status, msg):
+        if SEVERITY[status] >= SEVERITY["blocked"] and not self.block_reason:
+            self.block_reason = msg
         if SEVERITY[status] > SEVERITY[self.status]:
             self.status = status
         target = self.reviews if status != "high_confidence" else self.notes
@@ -179,7 +182,7 @@ class Emitter:
               "multirow": "win", "select": "sel", "sort": "srt", "unique": "uniq", "join": "jn", "joinmulti": "jnm",
               "union": "un", "append": "app", "summarize": "agg", "crosstab": "xtab", "transpose": "trn",
               "recordid": "rid", "runningtotal": "rt", "text2cols": "split", "dynrename": "ren", "datetime": "dt",
-              "spatial": "geo", "predictive": "ml", "unsupported": "mac", "cleanse": "cln", "impute": "imp"}
+              "spatial": "geo", "predictive": "ml", "unsupported": "mac", "cleanse": "cln", "impute": "imp", "sample": "smp", "findreplace": "fr"}
 
     def var(self, stream):
         """Variable name for a stream: the table name when read from a table in this unit, else a readable step name."""
@@ -323,7 +326,7 @@ class Emitter:
         try:
             res = X.translate(expr, field_types=types, current_field=current, row_ref=row_ref, df_var=df_var,
                               ci_default=self.options.get("text_match_case_insensitive", True),
-                              ansi=bool(self.options.get("ansi")))
+                              ansi=bool(self.options.get("ansi")), null_as_empty=bool(self.options.get("null_string_as_empty")))
         except X.TranslationError as exc:
             r.need("blocked", f"{what} cannot be translated: {exc} :: {one_line(expr, 160)}")
             return None
@@ -351,6 +354,19 @@ class Emitter:
         self.set_out(nid, anchors, types, None)
 
     def e_literal(self, nid, node, ins, anchors, r):
+        if node.get("datetime_now"):                          # DateTime Now: one record holding the run's date-time as text in the tool's format
+            dtn = node["datetime_now"]
+            try:
+                pattern = DT.to_java(dtn["format"], dtn.get("language") or "English")
+            except DT.FormatError as exc:
+                r.need("blocked", f"DateTime Now format {dtn['format']!r}: {exc}")
+                return self._blocked_guard(r, node, anchors, ins)
+            r.lines.append(f"{self.var((nid, anchors[0]))} = spark.range(1).select(F.date_format(F.current_timestamp(), {pattern!r}).alias('DateTimeNow'))")
+            r.orig.append(f"DateTime Now, format {dtn['format']!r}")
+            r.notes.append("DateTime Now: one record with the field DateTimeNow, the date-time of the run as text in the tool's format "
+                           "(Alteryx hh is the 24-hour clock); it depends on the Spark session time zone")
+            self.set_out(nid, anchors, {"datetimenow": "string"}, None)
+            return
         names, types, rows = node.get("field_names") or [], node.get("field_types") or [], node.get("data_rows") or []
         v = self.var((nid, "Output"))
         if not names:
@@ -376,7 +392,18 @@ class Emitter:
     def e_filter(self, nid, node, ins, anchors, r):
         st = self.first_in(ins)
         src, types = self.var(st), self.t_in(st)
-        res = self.tr(r, node.get("expression"), types, src, what="filter expression")
+        expr = node.get("expression")
+        simple = node.get("simple") or {}
+        if simple.get("operator") in ("=", "==", "!=", "<>", "<", ">", "<=", ">=") and re.fullmatch(r"-?\d+(\.\d+)?", simple.get("operand") or ""):
+            # Simple mode: the operand is typed text, compared as the field's type. A number is written unquoted only for a numeric field;
+            # for any other field it is a string (a quoted literal also compares correctly with a numeric column: Spark casts it to the column's type)
+            kind = types.get(simple["field"].lower(), "unknown")
+            if kind != "number":
+                op = {"==": "=", "<>": "!="}.get(simple["operator"], simple["operator"])
+                expr = f'[{simple["field"]}] {op} "{simple["operand"]}"'
+                r.notes.append(f"Filter (simple mode): {simple['field']} is compared with the text '{simple['operand']}'"
+                               + ("" if kind == "string" else f" (the type of {simple['field']} is not known; a numeric column compares with it equally)"))
+        res = self.tr(r, expr, types, src, what="filter expression")
         if res is None:
             return self._blocked_guard(r, node, anchors, ins)
         r.orig.append(node.get("expression"))
@@ -487,6 +514,8 @@ class Emitter:
         except Unique when the user accepted 'any row'."""
         explicit = node.get("order_by") or self.order.get(st)
         if explicit:
+            if node.get("order_by"):
+                r.notes.append(f"{what}: rows ordered by {', '.join(o['field_name'] for o in node['order_by'])} (the user's answer: the workflow sets no order)")
             return sort_args(explicit)
         if any_ok and node.get("order_any"):
             r.need("requires_review", f"{what}: user accepted that any matching row may be kept (no order key)")
@@ -500,25 +529,47 @@ class Emitter:
         types = self.t_in(st)
         src, v = self.var(st), self.var((nid, "Output"))
         out_field = node.get("output_field")
-        refs_own = re.search(r"\[Row\s*[+-]\s*\d+\s*:\s*" + re.escape(str(out_field)) + r"\s*\]", node.get("expression") or "")
-        if refs_own:
-            r.need("unsupported", "Expression references its own previous output (recursive Multi-Row Formula); "
-                                  "no window-function equivalent")
-            return self._blocked_guard(r, node, anchors, ins)
-        if node.get("other_rows", "Empty") not in ("Empty", ""):
-            r.need("requires_review", f"Multi-Row Formula 'other rows' = {node.get('other_rows')!r}: missing neighbours are NULL here")
-        r.orig.append(node.get("expression"))
+        expr = node.get("expression") or ""
+        other = node.get("other_rows") or "Empty"
         groups = node.get("group_fields") or []
+        r.orig.append(expr)
+        fill = self.forward_fill(expr, out_field) if node.get("update_field") else None
+        refs_own = re.search(r"\[Row\s*[+-]\s*\d+\s*:\s*" + re.escape(str(out_field)) + r"\s*\]", expr)
+        carry = None
+        if refs_own and not fill and node.get("update_field"):
+            try:
+                carry = X.carry_forward(expr, out_field)
+            except X.TranslationError:
+                carry = None
+        if refs_own and not fill and not carry:
+            r.need("unsupported", "Expression references its own previous output (recursive Multi-Row Formula) in a form the skill has no rule for "
+                                  f"(rules: forward fill, and an IF with one [Row-1:{out_field}] result): {one_line(expr, 200)}")
+            return self._blocked_guard(r, node, anchors, ins)
+        if other not in ("Empty", "NULL"):
+            r.need("unsupported", f"Multi-Row Formula 'values for rows that don't exist' = {other!r} is not implemented (only Empty and NULL)")
+            return self._blocked_guard(r, node, anchors, ins)
         oc = self.order_code(st, node, r, "Multi-Row Formula")
         if oc is None:
             return self._blocked_guard(r, node, anchors, ins)
+        if carry:
+            return self.carry_code(nid, node, r, st, src, v, groups, oc, carry, types, other)
         r.lines.append(f"{v}_window = {window_code(groups, oc)}")
         if not groups:
             r.notes.append("No group fields: window spans the whole dataset (single partition); size accordingly")
+        if fill:                                                # each NULL takes the last value before it; Empty fills the rows before the first value
+            r.lines.append(f"{v} = {src}.withColumn(\n    {out_field!r},\n    {self.fill_code(r, src, v, out_field, types, other)},\n)")
+            r.notes.append(f"Multi-Row Formula: forward fill of {out_field} - a NULL takes the last non-NULL value before it in the group "
+                           "(Alteryx evaluates the rows one after another, so a filled value carries on)")
+            self.set_out(nid, ["Output"], types, node.get("order_by") or self.order.get(st))
+            return
 
         def row_ref(name, off):
             fn = "F.lag" if off < 0 else "F.lead"
-            return f"{fn}({col(name)}, {abs(off)}).over({v}_window)"
+            default = self.empty_value(types.get(str(name).lower())) if other == "Empty" else None
+            if other == "Empty" and default is None and types.get(str(name).lower()) in (None, "unknown"):
+                self.need_types(node, [name])
+                r.need("requires_review", f"Multi-Row Formula: the type of {name} is unknown, so a row that does not exist gives NULL (Alteryx: empty text or 0)")
+            return f"{fn}({col(name)}, {abs(off)}{', ' + default if default else ''}).over({v}_window)"
         res = self.tr(r, node.get("expression"), types, src, row_ref=row_ref, what="multi-row expression")
         if res is None:
             return self._blocked_guard(r, node, anchors, ins)
@@ -526,7 +577,61 @@ class Emitter:
             if node.get("output_type") and not node.get("update_field") else res.code
         r.lines.append(f"{v} = {src}.withColumn({out_field!r}, {pretty.fmt(code, 4)})")
         types[str(out_field).lower()] = res.type
-        self.set_out(nid, ["Output"], types, self.order.get(st))
+        self.set_out(nid, ["Output"], types, node.get("order_by") or self.order.get(st))
+
+    def carry_code(self, nid, node, r, st, src, v, groups, oc, carry, types, other):
+        """IF ... THEN [Row-1:f] ... (see alteryx_expr.carry_forward): f = the value of the IF without that branch, taken at the last row so far (in the
+        group, in order) where the branch was not chosen; before the first such row there is no previous value, so 'other rows' applies."""
+        out_field = node["output_field"]
+        when, value = self.tr(r, carry[0], types, src, what="multi-row condition"), self.tr(r, carry[1], types, src, what="multi-row expression")
+        if when is None or value is None:
+            return self._blocked_guard(r, node, self.consumed_anchors(nid), {})
+        default = "F.lit(None)"
+        if other == "Empty":
+            kind = types.get(str(out_field).lower(), "unknown")
+            default = self.empty_value(kind) or "F.lit(None)"
+            if kind in ("unknown", ""):
+                self.need_types(node, [out_field])
+                r.need("requires_review", f"Multi-Row Formula: the type of {out_field} is unknown, so a first row that takes [Row-1:{out_field}] gives NULL "
+                                          "(Alteryx: empty text or 0) - answer its type")
+        r.lines.append(f"{v}_window = {window_code(groups, oc, frame=True)}")
+        r.lines.append(f"{v}_carry = {pretty.fmt(when.code, 0)}")
+        r.lines.append(f"{v}_value = {pretty.fmt(value.code, 0)}")
+        # the struct keeps a NULL result of a row apart from 'no row yet' (last(..., ignorenulls) skips only the rows that carry)
+        r.lines.append(f"{v}_last = F.last(F.when(~{v}_carry, F.struct({v}_value.alias('v'))), ignorenulls=True).over({v}_window)")
+        r.lines.append(f"{v} = {src}.withColumn({out_field!r}, F.when({v}_last.isNull(), {default}).otherwise({v}_last.getField('v')))")
+        r.notes.append(f"Multi-Row Formula: a row where the [Row-1:{out_field}] branch applies repeats the value of the last row before it (in the group, in order) "
+                       "where it did not - the result of Alteryx evaluating the rows one after another")
+        types[str(out_field).lower()] = types.get(str(out_field).lower(), value.type)
+        self.set_out(nid, ["Output"], types, node.get("order_by") or self.order.get(st))
+
+    @staticmethod
+    def forward_fill(expr, field_):
+        """True for the forward fill IF IsNull([f]) THEN [Row-1:f] ELSE [f] ENDIF (also IIF(IsNull([f]), [Row-1:f], [f]))."""
+        f = re.escape(str(field_))
+        prev, cur = r"\(?\s*\[Row\s*-\s*1\s*:\s*" + f + r"\s*\]\s*\)?", r"\(?\s*\[" + f + r"\]\s*\)?"
+        text = re.sub(r"\s+", " ", expr.strip())
+        return bool(re.fullmatch(r"(?i)IF\s+IsNull\(\s*\[" + f + r"\]\s*\)\s+THEN\s+" + prev + r"\s+ELSE\s+" + cur + r"\s+ENDIF", text)
+                    or re.fullmatch(r"(?i)IIF\(\s*IsNull\(\s*\[" + f + r"\]\s*\)\s*,\s*" + prev + r"\s*,\s*" + cur + r"\s*\)", text))
+
+    @staticmethod
+    def empty_value(kind):
+        """What Alteryx gives for a row that does not exist when 'other rows' is Empty: empty text for strings, 0 for numbers, NULL for dates."""
+        return {"string": "F.lit('')", "number": "F.lit(0)", "bool": "F.lit(False)"}.get(kind)
+
+    def fill_code(self, r, src, v, field_, types, other):
+        last = f"F.last({col(field_)}, ignorenulls=True).over({v}_window.rowsBetween(Window.unboundedPreceding, Window.currentRow))"
+        if other != "Empty":
+            return last
+        kind = types.get(str(field_).lower(), "unknown")
+        default = self.empty_value(kind)
+        if default:
+            return f"F.coalesce({last}, {default})"
+        if kind in ("date", "datetime"):
+            return last
+        self.need_types(self.wf.nodes[r.nid], [field_])
+        r.need("requires_review", f"Forward fill: the type of {field_} is unknown, so NULLs before the first value stay NULL (Alteryx: empty text or 0) - answer its type")
+        return last
 
     @staticmethod
     def select_config(ops):
@@ -564,21 +669,41 @@ class Emitter:
             return f"{out}.substr(1, {int(size)})" if size and 0 < int(size) < 1_000_000 else out
         return self.cast_to(r, code, alteryx_type, size)
 
+    def guarded(self, r, v, frame, have, items):
+        """items = [(configured field, column code)]. Alteryx ignores a configured field that is not in the incoming data (with a warning), so a field the
+        tracked columns do not confirm is taken only when the input has it at run time; a confirmed one is written plainly."""
+        out, unsure = [], []
+        for name, code in items:
+            if str(name).lower() in have:
+                out.append(code)
+            else:
+                out.append(f"*([{code}] if {str(name).lower()!r} in {v}_have else [])")
+                unsure.append(name)
+        if unsure:
+            r.lines.append(f"{v}_have = {{c.lower() for c in {frame}.columns}}")
+            absent = [n for n in unsure if have]
+            r.notes.append((f"{absent} are not among the incoming fields the workflow records" if absent else f"the incoming fields are not known for {unsure}")
+                           + ": each is taken only if the input has it at run time (Alteryx ignores a configured field that is missing)")
+        return out
+
     def e_select(self, nid, node, ins, anchors, r):
         st = self.first_in(ins)
         types = self.t_in(st)
+        have = set(types)
         ops = node.get("field_operations") or []
         v = self.var((nid, "Output"))
         order, drop, rename, retype, unknown = self.select_config(ops)
         if node.get("select_all_unknown") is None and not any(o["field_name"] == "*Unknown" for o in ops):
             r.notes.append("select_all_unknown not captured: unknown fields kept")
+        if not unknown:                                       # '*Unknown' off: only the listed fields go on
+            types = {k: t for k, t in types.items() if k in {o.lower() for o in order}}
         for op in ops:
             nm = op["field_name"].lower()
             if nm == "*unknown":
                 continue
             if op.get("selected") is False or op.get("action") == "deselect":
                 types.pop(nm, None)
-            else:
+            elif not have or nm in have:                      # a field known to be missing stays missing
                 t = types.pop(nm, "unknown")
                 if op.get("new_type"):
                     t = CATEGORY.get(op["new_type"].lower(), t)
@@ -592,13 +717,14 @@ class Emitter:
         if unknown and not order:                              # only removals: no need to list the other fields
             r.lines.append(f"{v} = {src}.drop({', '.join(repr(d) for d in drop)})" if drop else f"{v} = {src}")
             return
-        items = []
+        listed = []
         for name in order:
             c = col(name)
             if name in retype:
                 c = self.retyped(r, c, retype[name])
             target = rename.get(name) or (name if name in retype else None)      # a retyped column keeps its name explicitly (substr() would rename it)
-            items.append(f"{c}.alias({target!r})" if target else c)
+            listed.append((name, f"{c}.alias({target!r})" if target else c))
+        items = self.guarded(r, v, src, have, listed)
         if unknown:                                            # fields the configuration does not name follow the listed ones
             items.append(f"*[{DYNAMIC_COL} for c in {src}.columns if c.lower() not in {skip_expr(r, v + '_named', order + drop)}]")
         body = ",\n".join(f"    {i}" for i in items)
@@ -608,16 +734,19 @@ class Emitter:
         """Emit `<tag> = [(source column, output name), ...]` for one side of a Join: the configured fields in order, then (unless
         '*Unknown' is off) every other field of the input. Returns {output name: (type, size)} for the fields the configuration retypes."""
         order, drop, rename, retype, unknown = self.select_config(ops)
-        types_by_out = {rename.get(n, n): retype[n] for n in order if n in retype}
+        out_name = self.join_out_name(ops, rename, prefix)
+        types_by_out = {out_name(n): retype[n] for n in order if n in retype}
         cols_var = f"{side}_cols"
         parts = []
         if order:
             names = [n for n in order]
-            fallback = any(n.startswith(prefix) for n in names)       # configs name a collided field 'Left_X' / 'Right_X' for input field X
+            fallback = any(n.startswith(prefix) for n in names)       # the workflow names input field X 'Left_X' / 'Right_X'
             keys = f"(n, n.removeprefix({prefix!r}))" if fallback else "(n,)"
             r.lines.append(f"{cols_var} = {frame}.columns")
-            r.lines.append(f"{tag}_fields = " + pair_list([(n, rename.get(n, n)) for n in names]))
-            parts.append(f"[\n    (next(c for k in {keys} for c in {cols_var} if c.lower() == k.lower()), o)\n    for n, o in {tag}_fields\n]")
+            r.lines.append(f"{tag}_fields = " + pair_list([(n, out_name(n)) for n in names]))
+            # a listed field that the input does not have is left out, as Alteryx does
+            parts.append(f"[\n    (s, o) for s, o in (\n        (next((c for k in {keys} for c in {cols_var} if c.lower() == k.lower()), None), o)\n"
+                         f"        for n, o in {tag}_fields\n    ) if s is not None\n]")
         if unknown:
             seen = set(order) | set(drop)
             seen |= {n[len(prefix):] for n in seen if n.startswith(prefix)}
@@ -628,6 +757,29 @@ class Emitter:
             parts.append(f"[(c, c) for c in {cols_var}{cond}]")
         r.lines.append(f"{tag} = " + (" + ".join(parts) if parts else "[]"))
         return types_by_out
+
+    @staticmethod
+    def join_out_name(ops, rename, prefix):
+        """The Join's output name of a configured field: its rename, else the input field's own name. The workflow writes every field as Left_X / Right_X;
+        a rename attribute appears only where the output name differs - Alteryx itself writes rename="Right_X" on field Right_X when the name collided,
+        so a rename equal to the field keeps the prefixed name."""
+        same = {o["field_name"] for o in ops or [] if o.get("rename_to") and o["rename_to"] == o["field_name"]}
+        return lambda n: rename.get(n) or (n if n in same else n.removeprefix(prefix))
+
+    def join_side_types(self, ops, prefix, types, skip=()):
+        """{output name (lower): category} of one side of a Join, in output order, from its configuration and the input's known fields."""
+        order, drop, rename, retype, unknown = self.select_config(ops)
+        out_name, out = self.join_out_name(ops, rename, prefix), {}
+        for n in order:
+            src = n.lower() if n.lower() in types else n.lower().removeprefix(prefix.lower())
+            if types and src not in types:
+                continue                                       # not in the input: left out
+            t = types.get(src, "unknown")
+            out[out_name(n).lower()] = CATEGORY.get(retype[n][0].lower(), t) if n in retype else t
+        if unknown:
+            seen = {x.lower() for x in order + drop} | {x.lower().removeprefix(prefix.lower()) for x in order + drop} | {x.lower() for x in skip}
+            out.update({k: t for k, t in types.items() if k not in seen and k not in out})
+        return out
 
     def e_sort(self, nid, node, ins, anchors, r):
         st = self.first_in(ins)
@@ -673,6 +825,7 @@ class Emitter:
         if not keys:
             return self._blocked_guard(r, node, anchors, ins)
         want = [a for a in ("Join", "Left", "Right") if a in anchors] or ["Join"]
+        self._extra_skip = {}
         lv, rv, base = self.var(L), self.var(R), self.var((nid, "Join"))
         null_safe = bool(self.options.get("null_safe_join"))
         on = " & ".join((f"({qcol('l', a)}.eqNullSafe({qcol('r', b)}))" if null_safe else f"({qcol('l', a)} == {qcol('r', b)})") for a, b in keys)
@@ -717,7 +870,12 @@ class Emitter:
         r.notes.append(("NULL keys match each other (null_safe_join is on)" if null_safe else "NULL keys never match (SQL equality; the Alteryx help does not say - "
                         "confirm, or set null_safe_join)") + "; keys compared case-sensitively; right-side name collisions prefixed 'Right_'")
         lt, rt = self.t_in(L), self.t_in(R)
-        self.set_out(nid, ["Join"], {**lt, **rt}, None)
+        joined = {}
+        if lt and rt:                                          # the joined fields are known only when both inputs' fields are
+            joined = self.join_side_types(node.get("select_left"), "Left_", lt)
+            for k, t in self.join_side_types(node.get("select_right"), "Right_", rt, self._extra_skip.get("right", ())).items():
+                joined["right_" + k if k in joined else k] = t
+        self.set_out(nid, ["Join"], joined, None)
         self.set_out(nid, ["Left"], lt, None)
         self.set_out(nid, ["Right"], rt, None)
 
@@ -797,29 +955,38 @@ class Emitter:
         r.need("requires_review", "Join Multiple: the Input_#k_<field> naming and the join mode come from the tool's own settings; compare the output with Alteryx once")
         ops = node["select_ops"]
         order, drop, rename, retype, unknown = self.select_config(ops)
-        for op in ops:
-            nm = op["field_name"].lower()
-            if nm == "*unknown":
-                continue
-            if op.get("selected") is False:
-                out_types.pop(nm, None)
-            else:
-                t = out_types.pop(nm, "unknown")
-                if op.get("new_type"):
-                    t = CATEGORY.get(op["new_type"].lower(), t)
-                out_types[(op.get("rename_to") or op["field_name"]).lower()] = t
-        items = []
+        # the output name of a field is its rename, else the input field's own name without Input_#k_ (the tool's settings write every field as
+        # Input_#k_<field>); a name that an earlier output field already has keeps its Input_#k_ name
+        have, taken, listed, result = set(out_types) if all(self.t_in(s) for s in mapping.values()) else set(), set(), [], {}
         for name in order:
+            target = rename.get(name) or re.sub(r"^Input_#\d+_", "", name, flags=re.S)
+            if target.lower() in taken:
+                r.need("requires_review", f"Join Multiple: {name} would be named {target}, which an earlier output field already has - it keeps the name {name}; "
+                                          "compare the field names with the Alteryx output")
+                target = name
             c = f"F.col('`{name}`')"
             if name in retype:
                 c = self.retyped(r, c, retype[name])
-            target = rename.get(name) or (name if name in retype else None)
-            items.append(f"{c}.alias({target!r})" if target else c)
-        if unknown:
-            items.append(f"*[{DYNAMIC_COL} for c in {v}_joined.columns if c.lower() not in {skip_expr(r, v + '_named', order + drop)}]")
+            listed.append((name, c if target == name and name not in retype else f"{c}.alias({target!r})"))
+            if not have or name.lower() in have:
+                taken.add(target.lower())
+                t = out_types.get(name.lower(), "unknown")
+                result[target.lower()] = CATEGORY.get(retype[name][0].lower(), t) if name in retype else t
+        items = self.guarded(r, v, f"{v}_joined", have, listed)
+        if unknown:                                            # the fields the settings do not list: their own names, unless an earlier field has it
+            r.lines.append(set_stmt(f"{v}_taken", taken))
+            r.lines.append(f"{v}_rest = []\nfor c in {v}_joined.columns:\n    if c.lower() not in {skip_expr(r, v + '_named', order + drop)}:\n"
+                           f"        o = c.split('_', 2)[2] if c.startswith('Input_#') else c\n        o = c if o.lower() in {v}_taken else o\n"
+                           f"        {v}_taken.add(o.lower())\n        {v}_rest.append({DYNAMIC_COL}.alias(o))")
+            items.append(f"*{v}_rest")
+            named = {x.lower() for x in order + drop}
+            for k, t in out_types.items():
+                if k not in named:
+                    o = k.split("_", 2)[2] if k.startswith("input_#") else k
+                    result.setdefault(o if o not in result else k, t)
         body = ",\n".join(f"    {i}" for i in items)
         r.lines.append(f"{v} = {v}_joined.select(\n{body},\n)")
-        self.set_out(nid, ["Output"], out_types, None)
+        self.set_out(nid, ["Output"], result if have else {}, None)
 
     def e_union(self, nid, node, ins, anchors, r):
         srcs = [self.var(s) for s in ins.get("Input", [])]
@@ -923,7 +1090,13 @@ class Emitter:
         keys = node.get("key_fields") or []
         data = list(node.get("data_fields") or [])
         v, src = self.var((nid, "Output")), self.var(st)
+        have = set(self.t_in(st))
         names = repr(data)
+        if any(d.lower() not in have for d in data):           # a selected data field the input does not have is left out, as Alteryx does
+            names = f"[c for c in {names} if c.lower() in {{x.lower() for x in {src}.columns}}]"
+            absent = [d for d in data if have and d.lower() not in have]
+            if absent:
+                r.notes.append(f"Transpose: data fields {absent} are not among the incoming fields the workflow records; a missing one is left out at run time")
         if node.get("data_unknown"):                           # every other field is transposed as well
             taken = set(keys) | set(data) | set(node.get("data_skip") or [])
             names += f" + [c for c in {src}.columns if c.lower() not in {skip_expr(r, v + '_skip', taken)}]"
@@ -933,18 +1106,63 @@ class Emitter:
         r.lines.append(f"{v} = {src}.select(\n    {key_cols + ', ' if key_cols else ''}"
                        f"F.explode(F.array(*[{pairs} for c in {v}_fields])).alias('kv'),\n"
                        f").select({key_cols + ', ' if key_cols else ''}F.col('kv.Name'), F.col('kv.Value'))")
-        self.set_out(nid, ["Output"], {}, None)
+        tin = self.t_in(st)
+        self.set_out(nid, ["Output"], {**{k.lower(): tin.get(k.lower(), "unknown") for k in keys}, "name": "string", "value": "string"} if tin else {}, None)
 
     # ------------------------------------------------------------------ order-dependent / structural tools
+    def dropped_after(self, nid, anchor, field_, depth=0):
+        """The ids of the Select tools that remove `field_` before any tool reads it, when that holds on every path from this output; else [].
+        A path may pass tools that keep every field and do not read this one: Filter, Formula, Sort, a Select that keeps it unchanged, a control tool."""
+        name = str(field_).lower()
+        users = self.wf.consumers(nid, anchor)
+        if not users or depth > 20:
+            return []
+        out = []
+        for e in users:
+            k, node = self.wf.kind(e.dst), self.wf.nodes[e.dst]
+            reads = {f.lower() for f in X.referenced_fields(node.get("expression") or "")}
+            if k == "select":
+                order, drop, rename, retype, unknown = self.select_config(node.get("field_operations"))
+                if name in {d.lower() for d in drop} or (not unknown and name not in {o.lower() for o in order}):
+                    out.append(e.dst)
+                    continue
+                if any(n.lower() == name for n in list(rename) + list(retype)):
+                    return []
+            elif k == "filter" and name not in reads:
+                pass
+            elif k == "formula" and not any(name in {f.lower() for f in X.referenced_fields(f_.get("expression") or "")} | {str(f_.get("output_field")).lower()}
+                                            for f_ in node.get("formulas") or []):
+                pass
+            elif k == "sort" and name not in {f["field_name"].lower() for f in node.get("sort_fields") or []}:
+                pass
+            elif k != "passthrough":
+                return []
+            for a in self.consumed_anchors(e.dst):
+                more = self.dropped_after(e.dst, a, field_, depth + 1)
+                if not more:
+                    return []
+                out += more
+        return sorted(set(out))
+
     def e_recordid(self, nid, node, ins, anchors, r):
         st = self.first_in(ins)
+        if node.get("group_fields"):
+            r.need("unsupported", f"Record ID per group ({node['group_fields']}) is not implemented")
+            return self._blocked_guard(r, node, anchors, ins)
+        gone = self.dropped_after(nid, "Output", node.get("output_field"))
+        if gone:                                              # the number is never seen, so neither is the record order: the rows pass through
+            self.alias[(nid, "Output")] = self.var(st)
+            r.notes.append(f"Record ID: the field {node.get('output_field')} is removed by Select {gone} right after this tool, so it is not computed "
+                           "and the record order does not matter")
+            self.set_out(nid, ["Output"], self.t_in(st), self.order.get(st))
+            return
         oc = self.order_code(st, node, r, "Record ID")
         dtype = {"int32": "int", "int64": "bigint", "int16": "smallint"}.get((node.get("output_type") or "int64").lower(), "bigint")
         start = int(node.get("starting_value", 1))
         window = f"Window.orderBy({oc or 'F.monotonically_increasing_id()'})"
         field_ = node.get("output_field")
-        r.lines.append(f"{self.var((nid, 'Output'))} = {self.var(st)}.select(\n"
-                       f"    (F.row_number().over({window}) + F.lit({start - 1})).cast({dtype!r}).alias({field_!r}),\n    '*',\n)")
+        rid = f"(F.row_number().over({window}) + F.lit({start - 1})).cast({dtype!r}).alias({field_!r})"
+        r.lines.append(f"{self.var((nid, 'Output'))} = {self.var(st)}.select(\n" + ("    '*',\n    " + rid if node.get("record_id_last") else "    " + rid + ",\n    '*'") + ",\n)")
         r.notes.append("Global row_number() window = single-partition sort; expensive on large inputs")
         t = self.t_in(st)
         t[str(node.get("output_field")).lower()] = "number"
@@ -965,27 +1183,41 @@ class Emitter:
         st = self.first_in(ins)
         if r.status == "blocked":
             return self._blocked_guard(r, node, anchors, ins)
-        delim = node.get("delimiter") or ","
-        if len(delim.encode().decode("unicode_escape")) > 1:
-            r.need("requires_review", "Multi-character delimiter: each character treated as a separate delimiter (Alteryx rule assumed)")
+        delim = node.get("delimiter")
+        if not delim:                                         # never assume ',': the delimiter is the tool's main setting
+            r.need("blocked", "Text To Columns: the delimiter is missing from the workflow (<Delimeters value=...>) - say which character(s) split the field")
+            return self._blocked_guard(r, node, anchors, ins)
+        if str(node.get("split_flags") or "0") != "0":
+            r.need("unsupported", f"Text To Columns option flags {node['split_flags']} (quotes / parentheses / empty columns) are not implemented")
+            return self._blocked_guard(r, node, anchors, ins)
+        one = delim.encode().decode("unicode_escape")
+        if len(one) > 1:
+            r.notes.append(f"Delimiters {one!r}: each character splits the field (Alteryx: every character in the box is a delimiter)")
         if node.get("split_to", "columns") == "columns" and not node.get("num_columns"):
             r.need("blocked", "Split-to-columns requires the number of columns")
             return self._blocked_guard(r, node, anchors, ins)
-        one = delim.encode().decode("unicode_escape") if delim else ","
         pattern = re.escape(one) if len(one) == 1 else "[" + re.escape(one) + "]"
         field_, v, src = node["field_name"], self.var((nid, "Output")), self.var(st)
-        parts = f"F.split({col(field_)}.cast('string'), {pattern!r})"
+        types = self.t_in(st)
         if node.get("split_to", "columns") == "rows":
-            r.lines.append(f"{v} = {src}.withColumn({field_!r}, F.explode({parts}))")
+            r.lines.append(f"{v} = {src}.withColumn({field_!r}, F.explode(F.split({col(field_)}.cast('string'), {pattern!r})))")
             if node.get("skip_empty"):
                 r.lines.append(f"{v} = {v}.filter({col(field_)} != '')")
         else:
+            n, extra = int(node["num_columns"]), node.get("extra_parts") or "Last"
+            # Extra parts: 'Last' (leave extra in the last column) = split with a limit of N; 'Drop' = the first N parts only
+            limit = f", {n}" if extra == "Last" else ""
+            if extra not in ("Last", "Drop"):
+                r.need("requires_review", f"Text To Columns: extra parts handling {extra!r} - the first {n} parts are kept and the rest dropped")
             root = node.get("output_root_name") or field_
-            r.lines.append(f"{v}_parts = {parts}")
-            items = ", ".join(f"F.get({v}_parts, {i}).alias({root + str(i + 1)!r})" for i in range(int(node["num_columns"])))
+            r.lines.append(f"{v}_parts = F.split({col(field_)}.cast('string'), {pattern!r}{limit})")
+            items = ", ".join(f"F.get({v}_parts, {i}).alias({root + str(i + 1)!r})" for i in range(n))
             r.lines.append(f"{v} = {src}.select('*', {items})")
-        r.notes.append("New columns are named <root>1..<root>N (no separator); the source field is retained")
-        self.set_out(nid, ["Output"], self.t_in(st), self.order.get(st))
+            r.notes.append(f"New columns are named {root}1..{root}{n} (no separator); the source field is retained"
+                           + ("; parts beyond the last column stay in the last column (Alteryx 'leave extra in last column')" if extra == "Last" else ""))
+            if types:
+                types.update({f"{root}{i + 1}".lower(): "string" for i in range(n)})
+        self.set_out(nid, ["Output"], types, self.order.get(st))
 
     def e_dynrename(self, nid, node, ins, anchors, r):
         st = self.first_in(ins)
@@ -1059,10 +1291,11 @@ class Emitter:
     def e_passthrough(self, nid, node, ins, anchors, r):
         """Block Until Done and similar control tools: the data is unchanged, only execution order is affected."""
         st = self.first_in(ins)
-        self.alias[(nid, "Output")] = self.var(st)
+        for a in set(anchors) | {"Output"}:                    # Block Until Done has Output, Output2, Output3: each one is the same data
+            self.alias[(nid, a)] = self.var(st)
         r.notes.append(f"{node.get('original_tool_type')}: a control tool - data passes through unchanged; its "
                        "execution-ordering effect is not needed in dependency-ordered notebooks")
-        self.set_out(nid, ["Output"], self.t_in(st), self.order.get(st))
+        self.set_out(nid, sorted(set(anchors) | {"Output"}), self.t_in(st), self.order.get(st))
 
     def e_countrecords(self, nid, node, ins, anchors, r):
         """Count Records: one row, one field, the number of incoming records (the help: the count of records, named Count)."""
@@ -1100,11 +1333,11 @@ class Emitter:
         m_loop = re.fullmatch(r"\s*DateTimeAdd\(\s*\[(.+?)\]\s*,\s*(-?\d+)\s*,\s*['\"](\w+?)s?['\"]\s*\)\s*", loop, re.I)
         m_num = re.fullmatch(r"\s*\[(.+?)\]\s*\+\s*(-?\d+)\s*", loop)
         m_cond = re.fullmatch(r"\s*\[(.+?)\]\s*<=\s*(.+?)\s*", cond, re.S)
-        if node.get("update_field") or not (m_cond and (m_loop or m_num)) or \
-                (m_loop or m_num).group(1) != out or m_cond.group(1) != out:
-            r.need("unsupported", "Generate Rows: only 'init; [f] <= bound; DateTimeAdd([f],n,unit) | [f]+n' creating a new field is implemented")
+        if not (m_cond and (m_loop or m_num)) or (m_loop or m_num).group(1) != out or m_cond.group(1) != out:
+            r.need("unsupported", "Generate Rows: only 'init; [f] <= bound; DateTimeAdd([f],n,unit) | [f]+n' is implemented")
             return self._blocked_guard(r, node, anchors, ins)
         types = self.t_in(st)
+        kept = types.get(out.lower()) if node.get("update_field") else None      # an updated field keeps its type
         src, v = self.var(st), self.var((nid, "Output"))
         a = self.tr(r, init, types, src, what="Generate Rows init")
         b = self.tr(r, m_cond.group(2), types, src, what="Generate Rows condition bound")
@@ -1115,13 +1348,22 @@ class Emitter:
             if unit not in ("day", "week", "month", "year"):
                 r.need("unsupported", f"Generate Rows: step unit {m_loop.group(3)!r} is not implemented")
                 return self._blocked_guard(r, node, anchors, ins)
-            r.lines.append(f"{v} = {src}.withColumn({out!r}, F.explode(F.sequence(F.to_date({a.code}), F.to_date({b.code}), F.expr('interval {step} {unit}'))))")
-            r.lines.append(f"{v} = {v}.withColumn({out!r}, F.date_format({col(out)}, 'yyyy-MM-dd'))")
+            start, stop = f"F.to_date({a.code})", f"F.to_date({b.code})"
+            ok = f"{start} <= {stop}" if step > 0 else f"{start} >= {stop}"
+            r.lines.append(f"{v} = {src}.withColumn(\n    {out!r},\n    F.explode(F.when({ok}, F.sequence({start}, {stop}, F.expr('interval {step} {unit}')))"
+                           f".otherwise(F.array())),\n)")
+            if kept not in ("date", "datetime"):
+                r.lines.append(f"{v} = {v}.withColumn({out!r}, F.date_format({col(out)}, 'yyyy-MM-dd'))")
+            if unit in ("month", "year"):
+                r.need("requires_review", "Generate Rows by months: Alteryx adds the month to the previous value (Jan 31 -> Feb 29 -> Mar 29), "
+                                          "sequence() adds it to the start (-> Mar 31); the two agree when the start day is the 28th or earlier")
         else:
             step = int(m_num.group(2))
-            r.lines.append(f"{v} = {src}.withColumn({out!r}, F.explode(F.sequence(({a.code}).cast('long'), ({b.code}).cast('long'), F.lit({step}))))")
-        r.need("requires_review", "Generate Rows implemented with sequence(); confirm boundary and empty-range behaviour")
-        types[out.lower()] = "string" if m_loop else "number"
+            start, stop = f"({a.code}).cast('long')", f"({b.code}).cast('long')"
+            ok = f"{start} <= {stop}" if step > 0 else f"{start} >= {stop}"
+            r.lines.append(f"{v} = {src}.withColumn({out!r}, F.explode(F.when({ok}, F.sequence({start}, {stop}, F.lit({step}))).otherwise(F.array())))")
+        r.notes.append("Generate Rows: one row per value from the start while the condition holds (the end is included); a start past the end gives no row")
+        types[out.lower()] = kept if kept in ("date", "datetime") else ("string" if m_loop else "number")
         self.set_out(nid, ["Output"], types, None)
 
     # Data Cleansing (Cleanse.yxmc): the steps, their order and their expressions are those of the macro itself. Character classes use Java's
@@ -1163,19 +1405,24 @@ class Emitter:
         fields = list(o.get("fields") or [])
         kind_of = {f: types.get(f.lower(), "unknown") for f in fields}             # t_in already holds the user's answers (answers.field_types)
         unknown = [f for f, k in kind_of.items() if k in ("unknown", "")]
+        absent = [f for f in unknown if types and f.lower() not in types]      # the fields the incoming data is recorded without
         strings = [f for f in fields if kind_of[f] == "string"]
         numbers = [f for f in fields if kind_of[f] == "number"]
         others = [f for f in fields if f not in strings and f not in numbers and f not in unknown]
         if others:
             r.notes.append(f"Data Cleansing leaves {others} unchanged: the macro only cleans string fields and replaces NULL with 0 in numeric fields")
-        self.need_types(node, unknown)                       # the app asks the user, so that Spark SQL can be written too
+        self.need_types(node, [f for f in unknown if f not in absent])          # the app asks the user, so that Spark SQL can be written too
+        if absent:
+            r.notes.append(f"Data Cleansing: {absent} are selected in the tool but are not among the incoming fields the workflow records; a selected field that "
+                           "is missing is skipped, as the macro does")
         if unknown:                                          # the macro itself picks string / numeric fields by their type at run time: so does this code
-            r.lines.append(f"{v}_types = dict({cur}.dtypes)")
-            r.lines.append(f"{v}_strings = {strings!r} + [_c for _c in {unknown!r} if {v}_types[_c] == 'string']")
-            r.lines.append(f"{v}_numbers = {numbers!r} + [_c for _c in {unknown!r} if {v}_types[_c] in {NUMERIC_DTYPES!r} or {v}_types[_c].startswith('decimal')]")
+            r.lines.append(f"{v}_types = {{n.lower(): t for n, t in {cur}.dtypes}}")
+            r.lines.append(f"{v}_strings = {strings!r} + [_c for _c in {unknown!r} if {v}_types.get(_c.lower()) == 'string']")
+            r.lines.append(f"{v}_numbers = {numbers!r} + [_c for _c in {unknown!r} if {v}_types.get(_c.lower(), '') in {NUMERIC_DTYPES!r} "
+                           f"or {v}_types.get(_c.lower(), '').startswith('decimal')]")
             strings, numbers = f"{v}_strings", f"{v}_numbers"
-            r.notes.append(f"Data Cleansing: the type of {unknown} is not in the workflow, so the code picks string / numeric fields at run time like the macro does "
-                           "(Spark SQL needs the types up front: answer the type question in the terminal to get SQL for this table)")
+            r.notes.append(f"Data Cleansing: the type of {unknown} is not in the workflow, so the code picks string / numeric fields at run time like the macro does; "
+                           "a field the data does not have is skipped (Spark SQL needs the types up front: answer the type question in the terminal to get SQL for this table)")
 
         def per_field(cols, expr, what):
             if cols:
@@ -1212,9 +1459,11 @@ class Emitter:
         fields = list(o.get("fields") or [])
         to_name = next(k[3:] for k in ("to_mean", "to_median", "to_mode", "to_user") if o.get(k))
         r.orig.append(f"Imputation: replace {'NULL' if o.get('from_null') else o.get('from_value')} in {fields} with {to_name}")
-        if not fields:
-            r.need("blocked", "Imputation has no field selected")
-            return self._blocked_guard(r, node, anchors, ins)
+        if not fields:                                            # the macro imputes nothing then; it has no check that stops the workflow
+            self.alias[(nid, anchors[0])] = src
+            r.need("requires_review", "Imputation has no field selected: the records pass through unchanged (as the macro does - confirm in Alteryx)")
+            self.set_out(nid, anchors, types, self.order.get(st))
+            return
         missing = [f for f in fields if types and f.lower() not in types]
         if missing:
             r.need("blocked", f"Imputation fields not found in the incoming data: {missing}")
@@ -1250,6 +1499,111 @@ class Emitter:
         for k in new:
             out[k.lower()] = "number"
         self.set_out(nid, anchors, out, self.order.get(st))
+
+    def e_sample(self, nid, node, ins, anchors, r):
+        """Sample: the first / last N records, or all but the first N, of the data or of each group (the order of the incoming records)."""
+        st = self.first_in(ins)
+        src, v = self.var(st), self.var((nid, "Output"))
+        mode, n, groups = node.get("sample_method") or "", node.get("n_records"), list(node.get("group_fields") or [])
+        if mode not in ("first", "last", "skip") or not isinstance(n, int) or n < 0:
+            r.need("unsupported", f"Sample mode {mode!r} is not implemented (First N, Last N and Skip N are; the random and 1-of-every-N modes are not reproducible)")
+            return self._blocked_guard(r, node, anchors, ins)
+        what = f"Sample ({mode} {n}" + (f" per {', '.join(groups)})" if groups else ")")
+        r.orig.append(what)
+        if mode == "first" and n == 1 and groups and node.get("order_any") and not node.get("order_by") and not self.order.get(st):
+            r.lines.append(f"{v} = {src}.dropDuplicates({groups!r})")
+            r.need("requires_review", f"{what}: the user accepted that any record of each group may be kept (no order key)")
+            self.set_out(nid, ["Output"], self.t_in(st), None)
+            return
+        oc = self.order_code(st, node, r, what, any_ok=True)
+        if oc is None and not node.get("order_any"):
+            return self._blocked_guard(r, node, anchors, ins)
+        order = oc if oc else "F.lit(1)"
+        if mode == "last" and oc:                              # the last N records = the first N in the reversed order
+            fields = node.get("order_by") or self.order.get(st)
+            order = sort_args([{"field_name": f["field_name"], "ascending": not f.get("ascending", True),
+                                "nulls_first": not (f["nulls_first"] if f.get("nulls_first") is not None else f.get("ascending", True))} for f in fields])
+        r.lines.append(f"{v}_window = {window_code(groups, order)}")
+        keep = f"F.col('__rn') > {n}" if mode == "skip" else f"F.col('__rn') <= {n}"
+        r.lines.append(f"{v} = {src}.withColumn('__rn', F.row_number().over({v}_window)).filter({keep}).drop('__rn')")
+        self.set_out(nid, ["Output"], self.t_in(st), self.order.get(st))
+
+    # Find Replace: the F input (Targets) is searched for the values of a field of the R input (Source, the lookup). FindMode = Entire field | Beginning of field |
+    # Any part of field; NoCase; whole word. Replace mode writes a value of R in place of the found text; Append mode adds fields of R. Unmatched records pass unchanged.
+    def e_findreplace(self, nid, node, ins, anchors, r):
+        fst, rst = self.first_in(ins, "Targets"), self.first_in(ins, "Source")
+        if not ins.get("Targets") or not ins.get("Source"):
+            r.need("blocked", "Find Replace needs both inputs: the data to search (F) and the lookup (R)")
+            return self._blocked_guard(r, node, anchors, ins)
+        within, find, mode = node.get("fr_within"), node.get("fr_find"), node.get("fr_mode")
+        replace_mode, nocase, whole = node.get("fr_replace_mode"), bool(node.get("fr_nocase")), bool(node.get("fr_whole_word"))
+        appended = list(node.get("fr_append_fields") or [])
+        if not within or not find or mode not in ("FindEntire", "FindBegin", "FindAny") or replace_mode not in ("Replace", "Append"):
+            r.need("blocked", f"Find Replace: settings missing or not recognised (find within {within!r}, find value {find!r}, mode {mode!r}, {replace_mode!r})")
+            return self._blocked_guard(r, node, anchors, ins)
+        if replace_mode == "Replace" and node.get("fr_multiple"):
+            r.need("unsupported", "Find Replace 'replace multiple found items' (each found value replaced in turn) is not implemented")
+            return self._blocked_guard(r, node, anchors, ins)
+        if replace_mode == "Replace" and not node.get("fr_replace_with"):
+            r.need("blocked", "Find Replace: the field of R that replaces the found text is missing")
+            return self._blocked_guard(r, node, anchors, ins)
+        ft, rt = self.t_in(fst), self.t_in(rst)
+        clash = [a for a in appended if replace_mode == "Append" and ft and a.lower() in ft]
+        if clash:
+            r.need("blocked", f"Find Replace appends {clash}, but the data searched already has fields with those names")
+            return self._blocked_guard(r, node, anchors, ins)
+        fsrc, rsrc, v = self.var(fst), self.var(rst), self.var((nid, "Output"))
+        r.orig.append(f"Find Replace: find R.{find} in F.{within} ({mode}{', any case' if nocase else ''}{', whole word' if whole else ''}); "
+                      + (f"replace with R.{node.get('fr_replace_with')}" if replace_mode == "Replace" else f"append {appended}"))
+        carried = [("__fr_find", find)] + ([("__fr_with", node["fr_replace_with"])] if replace_mode == "Replace" else [(f"__fr_{a}", a) for a in appended])
+        r_order = self.order.get(rst)
+        rank = f"F.row_number().over(Window.orderBy({sort_args(r_order)}))" if r_order else "F.monotonically_increasing_id()"
+        r.lines.append(f"{v}_f = {fsrc}.withColumn('__fr_row', F.monotonically_increasing_id())")
+        cols = ", ".join(f"F.col({src!r}).alias({dst!r})" for dst, src in carried)
+        r.lines.append(f"{v}_r = {rsrc}.select({cols}, {rank}.alias('__fr_rank')).filter(F.col('__fr_find').isNotNull() & (F.col('__fr_find') != F.lit('')))")
+        hay, needle = f"F.col({within!r})", "F.col('__fr_find')"
+        if nocase:
+            hay, needle = f"F.lower({hay})", f"F.lower({needle})"
+        if whole:                                              # the found value as a literal (\Q..\E) between word boundaries
+            start = ("(?i)" if nocase else "") + ("^" if mode != "FindAny" else r"(?<!\w)") + r"\Q"
+            end = r"\E" + ("$" if mode == "FindEntire" else r"(?!\w)")
+            cond = f"F.col({within!r}).rlike(F.concat(F.lit({start!r}), F.col('__fr_find'), F.lit({end!r})))"
+        else:
+            cond = {"FindEntire": f"({hay} == {needle})", "FindBegin": f"{hay}.startswith({needle})", "FindAny": f"{hay}.contains({needle})"}[mode]
+        r.lines.append(f"{v}_m = (\n    {v}_f.alias('l')\n    .join({v}_r.alias('r'), {cond}, 'left')\n"
+                       f"    .select(*[F.col(f'`{{c}}`') for c in {v}_f.columns + {v}_r.columns])\n)")
+        r.lines.append(f"{v}_m = {v}_m.withColumn('__rn', F.row_number().over(Window.partitionBy(F.col('__fr_row')).orderBy(F.col('__fr_rank').asc_nulls_last())))")
+        keep = f"[F.col(f'`{{c}}`') for c in {fsrc}.columns]"
+        if replace_mode == "Append":
+            new = ", ".join(f"F.col('__fr_{a}').alias({a!r})" for a in appended)
+            r.lines.append(f"{v} = {v}_m.filter(F.col('__rn') == 1).select(*{keep}, {new})")
+        else:
+            found = "F.col('__fr_find')"
+            if mode == "FindEntire":
+                value = "F.col('__fr_with')"
+            elif nocase or whole:
+                start = ("(?i)" if nocase else "") + ("^" if mode == "FindBegin" else (r"(?<!\w)" if whole else "")) + r"\Q"
+                end = r"\E" + (r"(?!\w)" if whole else "")
+                value = f"F.regexp_replace(F.col({within!r}), F.concat(F.lit({start!r}), {found}, F.lit({end!r})), F.col('__fr_with'))"
+                r.notes.append("Find Replace: a '$' or '\\' in the replacement value has a special meaning in regexp_replace - check the lookup values")
+            elif mode == "FindBegin":
+                value = f"F.concat(F.col('__fr_with'), F.col({within!r}).substr(F.length({found}) + 1, F.length(F.col({within!r}))))"
+            else:
+                value = f"F.replace(F.col({within!r}), {found}, F.col('__fr_with'))"
+            r.lines.append(f"{v} = {v}_m.filter(F.col('__rn') == 1).withColumn({within!r}, F.when({found}.isNotNull(), {value}).otherwise(F.col({within!r})))"
+                           f".select(*{keep})")
+            if mode == "FindAny":
+                r.notes.append("Find Replace (any part of the field): every occurrence of the found value is replaced")
+        r.notes.append(f"Find Replace: a record of F that matches no record of R is kept unchanged{' (the appended fields are NULL)' if replace_mode == 'Append' else ''}")
+        r.notes.append("When several records of R match, the first in R's order is used" + ("" if r_order else
+                       " - R has no sort, so its read order stands in for the Alteryx record order (compare once if R has overlapping values)"))
+        if not r_order:
+            r.need("requires_review", "Find Replace: several lookup values can match one record; without a sort on the lookup input the 'first' match follows "
+                                      "the lookup's read order - add a Sort before it in Alteryx terms if the choice matters")
+        out = dict(ft)
+        for a in appended if replace_mode == "Append" else []:
+            out[a.lower()] = rt.get(a.lower(), "unknown")
+        self.set_out(nid, ["Output"], out, self.order.get(fst))
 
     def e_predictive(self, nid, node, ins, anchors, r):
         r.need("unsupported", f"{node.get('model_type')}: predictive tool - re-implement the model and compare; no equivalence assumed")

@@ -52,6 +52,8 @@ NODE_SPECS = {
     "PredictiveModelNode": dict(kind="predictive", order="breaks"),
     "DataCleansingMacroNode": dict(kind="cleanse", order="preserve"),
     "ImputationMacroNode": dict(kind="impute", order="preserve"),
+    "SampleNode": dict(kind="sample", order="preserve", order_sensitive=True),
+    "FindReplaceNode": dict(kind="findreplace", order="preserve"),
     "UnsupportedNode": dict(kind="unsupported", order="breaks"),
 }
 NO_DATA_KINDS = {"browse", "comment"}
@@ -297,7 +299,7 @@ def imputation_options(cfg: dict) -> Optional[dict]:
         return None
     flag = lambda name: str(raw.get(name, "")).strip().lower() == "true"          # noqa: E731
     opts = {key: flag(name) for name, key in IMPUTATION_QUESTIONS.items() if name.startswith(("radio", "checkbox"))}
-    opts["fields"] = [f.replace('""', '"') for f in re.findall(r'"((?:[^"]|"")*)"', raw.get("listbox Select Incoming Fields", ""))]
+    opts["fields"] = [f.replace('""', '"') for f in re.findall(r'"((?:[^"]|"")*)"', raw.get("listbox Select Incoming Fields", "")) if f]     # "" = no field
     try:
         opts["from_value"], opts["to_value"] = float(raw.get("updown User Replace Value") or 0), float(raw.get("updown User Replace With Value") or 0)
     except ValueError:
@@ -318,6 +320,27 @@ def _promote_macros(wf):
             opts = imputation_options(n.get("original_configuration") or {})
             if opts is not None:
                 n.update(node_type="ImputationMacroNode", original_tool_type="Imputation", impute=opts, converted_from="UnsupportedNode")
+        elif macro in ("macro:crew groupbyrecordid.yxmc", "crew groupbyrecordid.yxmc"):
+            raw = _macro_values(n.get("original_configuration") or {})
+            start = str(raw.get("StartingValue") or "").strip()
+            if raw and set(raw) <= {"FieldName", "LastColumn", "StartingValue", "GroupingFields"} and raw.get("FieldName") and start.lstrip("-").isdigit():
+                groups = [g.replace('""', '"') for g in re.findall(r'"((?:[^"]|"")*)"', raw.get("GroupingFields") or "") if g]
+                n.update(node_type="RecordIDNode", original_tool_type="Record ID (CReW GroupByRecordID macro)", output_field=raw["FieldName"],
+                         starting_value=int(start), group_fields=groups, record_id_last=str(raw.get("LastColumn")).strip().lower() == "true",
+                         converted_from="UnsupportedNode")
+        elif str(n.get("original_plugin_name") or "").lower() == "datetimenow":
+            # the DateTime Now tool (DTNEngine.yxmc): one record, one text field DateTimeNow = the run's date-time in the chosen OutputFormat (anchor DTN)
+            raw = _macro_values(n.get("original_configuration") or {})
+            if raw.get("OutputFormat") and not wf.producers(nid):
+                n.update(node_type="LiteralDataNode", original_tool_type="DateTime Now", field_names=["DateTimeNow"], field_types=["V_WString"], data_rows=[],
+                         datetime_now={"format": raw["OutputFormat"], "language": raw.get("Language") or "English"}, converted_from="UnsupportedNode")
+
+
+def _macro_values(cfg: dict) -> dict:
+    """{question name: text} of a macro call's <Configuration><Value name=...> list."""
+    values = cfg.get("Value") if isinstance(cfg, dict) else None
+    values = [values] if isinstance(values, dict) else values
+    return {v.get("@name"): (v.get("#text") or "") for v in values if isinstance(v, dict)} if isinstance(values, list) else {}
 
 
 def _promote_data_cleansing(wf):
@@ -510,7 +533,7 @@ def step_detail(wf: Workflow, bronze_of: dict, nid: int, anchor: str = "Output")
         return snake(re.sub(r"(?i)^macro:|\.yxmc$|_v\d+(\.\d+)*$", "", label), 20)
     return {"multifield": "adjusted", "select": "selected", "sort": "sorted", "union": "combined", "append": "appended",
             "crosstab": "pivot", "transpose": "unpivoted", "recordid": "indexed", "runningtotal": "running_total",
-            "text2cols": "split", "dynrename": "renamed", "cleanse": "cleansed", "impute": "imputed", "datetime": "dated", "countrecords": "record_count", "autofield": "fitted", "spatial": "geo", "predictive": "forecast",
+            "text2cols": "split", "dynrename": "renamed", "cleanse": "cleansed", "impute": "imputed", "sample": "sampled", "findreplace": "found", "datetime": "dated", "countrecords": "record_count", "autofield": "fitted", "spatial": "geo", "predictive": "forecast",
             "literal": ""}.get(k, k)
 
 

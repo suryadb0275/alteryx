@@ -48,7 +48,7 @@ def descendants(wf, start, live):
 
 def classify(wf, em, live):
     """-> (blocked: {id: reason}, waiting: {id: [blocking ids]}) among live data tools."""
-    blocked = {n: (em.results[n].reviews or ["blocked"])[0] for n in live
+    blocked = {n: em.results[n].block_reason or (em.results[n].reviews or ["blocked"])[0] for n in live
                if n in em.results and em.results[n].status in ("blocked", "unsupported")}
     waiting = {}
     for b in blocked:
@@ -91,6 +91,8 @@ def _category(node, reason):
     if code_tool_summary(node):
         return "codetool"
     r = reason.lower()
+    if "depends on record order" in r:                    # also a macro the skill converts by rule (Record ID macro) that waits for its order
+        return "order"
     if node.get("macro_file") or "macro:" in str(node.get("original_plugin_name", "")).lower():
         return "macro"
     if r.startswith(CONFIG_PREFIX):
@@ -297,7 +299,7 @@ def answers_template(pre, wf):
         "accept": {"order_any": [], "source_schema_at_runtime": True, "defaults": False},
         "project": {"timezone": "UTC", "catalog": "main", "bronze_schema": "bronze", "silver_schema": "silver",
                     "gold_schema": "gold", "write_mode": "overwrite", "allow_overwrite": False, "spark_runtime": "DBR 16.x",
-                    "ansi": False, "text_match_case_sensitive": False, "null_safe_join": False},
+                    "ansi": False, "text_match_case_sensitive": False, "null_safe_join": False, "null_string_as_empty": False},
         "validation": {"input_snapshot": "", "alteryx_output": ""},
     }
 
@@ -309,14 +311,17 @@ def apply_answers(wf, answers):
     accept = answers.get("accept", {})
     order_any = accept.get("order_any", [])
     for n, node in wf.nodes.items():
-        if wf.kind(n) == "unique" and (order_any == "all" or n in [int(x) for x in order_any if str(x).isdigit()]):
+        if wf.kind(n) in ("unique", "sample") and (order_any == "all" or n in [int(x) for x in order_any if str(x).isdigit()]):
             node["order_any"] = True
         macro = node.get("macro_file") or (str(node.get("original_plugin_name", "")).split("macro:")[-1]
                                            if "macro:" in str(node.get("original_plugin_name", "")) else None)
         if macro:
             wanted = {k.lower(): v for k, v in answers.get("macros", {}).items()}
             m = wanted.get(str(macro).lower()) or wanted.get(str(macro).replace("/", "\\").split("\\")[-1].lower())
-            if m and m.get("as_source") and not wf.producers(n) and wf.consumers(n):
+            only_control = all(str(e.dst_anchor).lower().startswith("control") for e in wf.producers(n))
+            if m and m.get("tools") and n not in [int(x) for x in m["tools"]]:
+                m = None                                   # the answer was given for other calls of this macro
+            if m and m.get("as_source") and only_control and wf.consumers(n):
                 # the user says the macro only reads a source (a Google Sheet, a table): its result is expected in an existing Bronze table
                 table = str(m.get("table") or re.sub(r"(?i)\.yxmc$", "", str(macro).replace("/", "\\").split("\\")[-1]))
                 node.update(node_type="ReadNode", source_type="external", query="", table_name=table, file_path="", file_format="",
@@ -338,5 +343,6 @@ def project_settings(answers):
             "allow_overwrite": bool(p.get("allow_overwrite", False)), "ansi": p.get("ansi"),
             "text_match_case_insensitive": not p.get("text_match_case_sensitive", False),
             "null_safe_join": bool(p.get("null_safe_join", False)),
+            "null_string_as_empty": bool(p.get("null_string_as_empty", False)),   # a NULL text field compares as '' in = / != (an Alteryx habit; not stated in its help)
             "spark_runtime": p.get("spark_runtime", "DBR 16.x"),
             "defaults_confirmed": bool((answers or {}).get("accept", {}).get("defaults"))}
